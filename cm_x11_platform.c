@@ -10,8 +10,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#define GL_GLEXT_PROTOTYPES
 #include <GL/glx.h>
 #include <GL/gl.h>
+#include <GL/glext.h>
 #include <cairo/cairo-xlib.h>
 #include <pango/pangocairo.h>
 
@@ -31,6 +33,19 @@
 #define WINDOW_WIDTH 700
 
 #include "app_api.h"
+
+void MessageCallback( GLenum source,
+                      GLenum type,
+                      GLuint id,
+                      GLenum severity,
+                      GLsizei length,
+                      const GLchar* message,
+                      const void* userParam )
+{
+    fprintf( stderr, "GL CALLBACK: %s type = 0x%x, severity = 0x%x, message = %s\n",
+             ( type == GL_DEBUG_TYPE_ERROR ? "** GL ERROR **" : "" ),
+             type, severity, message );
+}
 
 bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_input_t input)
 {
@@ -58,16 +73,107 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
             break;
     }
 
-    static double alpha = 0;
-    if (alpha > 1) {
-        alpha = 0;
+    static bool run_once = false;
+    static GLint uni_color;
+    if (!run_once || input.force_redraw) {
+        run_once = true;
+        GLboolean has_compiler;
+        glGetBooleanv (GL_SHADER_COMPILER, &has_compiler);
+        assert (has_compiler == GL_TRUE);
+
+        glClearColor(0.0, 0.0, 0.0, 1);
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        glEnable (GL_DEBUG_OUTPUT);
+        glDebugMessageCallback((GLDEBUGPROC)MessageCallback, 0);
+
+        //GLuint vao;
+        //glGenVertexArrays (1, &vao);
+        //glBindVertexArray (vao);
+
+        float vertices[] = { 0.0f,  0.5f, // Vertex 1 (X, Y)
+                            0.5f, -0.5f, // Vertex 2 (X, Y)
+                            -0.5f, -0.5f};  // Vertex 3 (X, Y)
+        GLuint vbo;
+        glGenBuffers (1, &vbo); // Generate 1 buffer
+        glBindBuffer (GL_ARRAY_BUFFER, vbo);
+        glBufferData (GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+        // Vertex shader
+        const char* vertex_source =
+            "#version 150 core\n"
+            "in vec2 position;\n"
+            "void main()\n"
+            "{\n"
+            "    gl_Position = vec4(position, 0.0, 1.0);\n"
+            "}";
+
+        GLuint vertex_shader = glCreateShader (GL_VERTEX_SHADER);
+        glShaderSource (vertex_shader, 1, &vertex_source, NULL);
+        glCompileShader (vertex_shader);
+        GLint shader_status;
+        glGetShaderiv (vertex_shader, GL_COMPILE_STATUS, &shader_status);
+        if (shader_status != GL_TRUE) {
+            printf ("Vertex shader compilation failed.\n");
+            char buffer[512];
+            glGetShaderInfoLog(vertex_shader, 512, NULL, buffer);
+            printf ("%s\n", buffer);
+        }
+
+        // Fragment shader
+        const char* fragment_source =
+            "#version 150 core\n"
+            "uniform vec3 triangle_color;\n"
+            "out vec4 outColor;\n"
+            "void main()\n"
+            "{\n"
+            "    outColor = vec4(triangle_color, 1.0);\n"
+            "}";
+
+        GLuint fragment_shader = glCreateShader (GL_FRAGMENT_SHADER);
+        glShaderSource (fragment_shader, 1, &fragment_source, NULL);
+        glCompileShader (fragment_shader);
+        glGetShaderiv (fragment_shader, GL_COMPILE_STATUS, &shader_status);
+        if (shader_status != GL_TRUE) {
+            printf ("Fragment shader compilation failed.\n");
+            char buffer[512];
+            glGetShaderInfoLog(vertex_shader, 512, NULL, buffer);
+            printf ("%s\n", buffer);
+        }
+
+        // Program creation
+        GLuint program = glCreateProgram();
+        glAttachShader (program, vertex_shader);
+        glAttachShader (program, fragment_shader);
+        glBindFragDataLocation (program, 0, "outColor");
+        glLinkProgram (program);
+        glUseProgram (program);
+
+        GLint pos = glGetAttribLocation (program, "position");
+        glVertexAttribPointer (pos, 2, GL_FLOAT, GL_FALSE, 0, 0);
+        glEnableVertexAttribArray (pos);
+
+        uni_color = glGetUniformLocation (program, "triangle_color");
     }
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-    // NOTE: X RENDER expects premultiplied colors
-    glClearColor(0.0*alpha, 0.0*alpha, 0.9*alpha, alpha);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    alpha += 0.005;
+
+    // Clear the screen to black
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    int static time = 0;
+    glUniform3f (uni_color, (sin(time++/9.0f) + 1.0f)/2.0f, 0.0f, 0.0f);
+    glDrawArrays (GL_TRIANGLES, 0, 3);
+
+    //static double alpha = 0;
+    //if (alpha > 1) {
+    //    alpha = 0;
+    //}
+    //glEnable(GL_BLEND);
+    //glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    //// NOTE: X RENDER expects premultiplied colors
+    //glClearColor(0.0*alpha, 0.0*alpha, 0.9*alpha, alpha);
+    //glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    //alpha += 0.005;
 
     return true;
 }
@@ -797,6 +903,7 @@ int main (void)
                 case XCB_EXPOSE:
                     {
                         // We should tell which areas need exposing
+                        app_input.force_redraw = true;
                         force_blit = true;
                     } break;
                 case XCB_BUTTON_PRESS:
