@@ -40,7 +40,7 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
         st->is_initialized = true;
     }
 
-    bool blit_needed = false;
+    //bool blit_needed = false;
 
     update_input (&st->gui_st, input);
 
@@ -58,17 +58,16 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
             break;
     }
 
-    static bool draw_once = true;
-    if (input.force_redraw || draw_once) {
+    static double alpha = 0;
+    if (alpha > 1) {
+        alpha = 0;
     }
-
-    static double blue = 0;
-    if (blue > 1) {
-        blue = 0;
-    }
-    glClearColor(0.2, 0.4, blue, 0.5);
-    glClear(GL_COLOR_BUFFER_BIT);
-    blue += 0.005;
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    // NOTE: X RENDER expects premultiplied colors
+    glClearColor(0.0*alpha, 0.0*alpha, 0.9*alpha, alpha);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    alpha += 0.005;
 
     return true;
 }
@@ -79,6 +78,7 @@ struct x_state {
 
     xcb_screen_t *screen;
     uint8_t depth;
+    xcb_visualid_t visual_id;
 
     xcb_drawable_t window;
     xcb_pixmap_t backbuffer;
@@ -378,35 +378,58 @@ void increment_sync_counter (xcb_sync_int64_t *counter)
     }
 }
 
-xcb_visualtype_t* get_visual_struct_from_visualid (xcb_connection_t *c, xcb_screen_t *screen, xcb_visualid_t id)
+// NOTE: This seems to be the only way to get the depth from a visual_id.
+#define xcb_visual_type_from_visualid(c,screen,id) \
+    xcb_visual_id_lookup (c,screen,id,NULL)
+xcb_visualtype_t*
+xcb_visual_id_lookup (xcb_connection_t *c, xcb_screen_t *screen,
+                      xcb_visualid_t id, uint8_t *depth)
 {
-    xcb_visualtype_t  *visual_type = NULL;    /* the returned visual type */
-
-    /* you init the connection and screen_nbr */
+    xcb_visualtype_t  *visual_type = NULL;
 
     xcb_depth_iterator_t depth_iter;
     if (screen) {
         depth_iter = xcb_screen_allowed_depths_iterator (screen);
         for (; depth_iter.rem; xcb_depth_next (&depth_iter)) {
-            xcb_visualtype_iterator_t visual_iter;
+            if (depth != NULL) {
+                *depth = depth_iter.data->depth;
+            }
 
+            xcb_visualtype_iterator_t visual_iter;
             visual_iter = xcb_depth_visuals_iterator (depth_iter.data);
             for (; visual_iter.rem; xcb_visualtype_next (&visual_iter)) {
                 if (id == visual_iter.data->visual_id) {
                     visual_type = visual_iter.data;
-                    //break;
+                    break;
                 }
+            }
+
+            if (visual_type != NULL) {
+                break;
             }
         }
     }
     return visual_type;
 }
 
-xcb_visualtype_t* get_visual_max_depth (xcb_connection_t *c, xcb_screen_t *screen, uint8_t *found_depth)
+uint8_t xcb_get_visual_max_depth (xcb_connection_t *c, xcb_screen_t *screen)
 {
-    xcb_visualtype_t  *visual_type = NULL;    /* the returned visual type */
+    uint8_t depth = 0;
+    xcb_depth_iterator_t depth_iter;
+    if (screen) {
+        depth_iter = xcb_screen_allowed_depths_iterator (screen);
+        for (; depth_iter.rem; xcb_depth_next (&depth_iter)) {
+            if (depth < depth_iter.data->depth) {
+                depth = depth_iter.data->depth;
+            }
+        }
+    }
+    return depth;
+}
 
-    /* you init the connection and screen_nbr */
+xcb_visualtype_t* get_visual_of_max_depth (xcb_connection_t *c, xcb_screen_t *screen, uint8_t *found_depth)
+{
+    xcb_visualtype_t  *visual_type = NULL;
 
     *found_depth = 0;
     xcb_depth_iterator_t depth_iter;
@@ -491,7 +514,11 @@ void x11_create_window (struct x_state *x_st, char *title, int visual_id)
                              XCB_EVENT_MASK_PROPERTY_CHANGE;
     uint32_t mask = XCB_CW_EVENT_MASK;
 
-    mask |= XCB_CW_COLORMAP; 
+    // NOTE: We will probably want a window that allows transparencies, this
+    // means it has higher depth than the root window. Usually colormap and
+    // color_pixel are inherited from root, if we don't set them here and the
+    // depths are different window creation will fail.
+    mask |= XCB_CW_BORDER_PIXEL|XCB_CW_COLORMAP;
     xcb_colormap_t colormap = xcb_generate_id (x_st->xcb_c);
     xcb_create_colormap (x_st->xcb_c, XCB_COLORMAP_ALLOC_NONE,
                          colormap, x_st->screen->root, visual_id); 
@@ -500,7 +527,7 @@ void x11_create_window (struct x_state *x_st, char *title, int visual_id)
     uint32_t values[] = {// , // XCB_CW_BACK_PIXMAP
                          // , // XCB_CW_BACK_PIXEL
                          // , // XCB_CW_BORDER_PIXMAP
-                         // , // XCB_CW_BORDER_PIXEL
+                         0  , // XCB_CW_BORDER_PIXEL
                          // , // XCB_CW_BIT_GRAVITY
                          // , // XCB_CW_WIN_GRAVITY
                          // , // XCB_CW_BACKING_STORE
@@ -515,16 +542,23 @@ void x11_create_window (struct x_state *x_st, char *title, int visual_id)
                          };
 
     x_st->window = xcb_generate_id (x_st->xcb_c);
-    xcb_create_window (x_st->xcb_c,        /* connection          */
-            XCB_COPY_FROM_PARENT,          /* depth               */
-            x_st->window,                  /* window Id           */
-            x_st->screen->root,            /* parent window       */
-            0, 0,                          /* x, y                */
-            WINDOW_WIDTH, WINDOW_HEIGHT,   /* width, height       */
-            0,                             /* border_width        */
-            XCB_WINDOW_CLASS_INPUT_OUTPUT, /* class               */
-            visual_id,                     /* visual              */
-            mask, values);                 /* masks */
+    xcb_void_cookie_t ck = xcb_create_window_checked (
+                x_st->xcb_c,                   /* connection          */
+                x_st->depth,                   /* depth               */
+                x_st->window,                  /* window Id           */
+                x_st->screen->root,            /* parent window       */
+                0, 0,                          /* x, y                */
+                WINDOW_WIDTH, WINDOW_HEIGHT,   /* width, height       */
+                0,                             /* border_width        */
+                XCB_WINDOW_CLASS_INPUT_OUTPUT, /* class               */
+                visual_id,                     /* visual              */
+                mask, values);                 /* masks */
+    xcb_generic_error_t *err = xcb_request_check (x_st->xcb_c, ck);
+    if (err != NULL) {
+        printf ("Window creation failed (Error code: %d)\n", err->error_code);
+        free (err);
+        return;
+    }
 
     // Set window title
     x11_change_property (x_st->xcb_c,
@@ -642,6 +676,7 @@ int main (void)
     init_x11_atoms (x_st);
 
     /* Get the default screen */
+    // TODO: Do this using only xcb.
     // TODO: What happens if there is more than 1 screen?, probably will
     // have to iterate with xcb_setup_roots_iterator(), and xcb_screen_next ().
     int default_screen = DefaultScreen (x_st->xlib_dpy);
@@ -653,29 +688,58 @@ int main (void)
         }
     }
 
+    /* Get a GLXFBConfig */
+    // We want a GLXFBConfig with a double buffer and a X11 visual that allows
+    // for alpha channel in the window (transparent windows).
     int num_GLX_confs;
-    GLXFBConfig* framebuffer_confs = glXGetFBConfigs (x_st->xlib_dpy, default_screen, &num_GLX_confs);
-    int has_double_buffer = False;
-    glXGetFBConfigAttrib (x_st->xlib_dpy, framebuffer_confs[0], GLX_DOUBLEBUFFER, &has_double_buffer);
-    if (!has_double_buffer) {
-        printf ("Choosen GLXFBConfig does not have double buffer\n");
+    int attrib_list[] = {GLX_DOUBLEBUFFER, GL_TRUE,
+                         GLX_RED_SIZE, 8,
+                         GLX_GREEN_SIZE, 8,
+                         GLX_BLUE_SIZE, 8,
+                         GLX_ALPHA_SIZE, 8,
+                         GL_NONE};
+    GLXFBConfig* framebuffer_confs =
+        glXChooseFBConfig (x_st->xlib_dpy, default_screen, attrib_list, &num_GLX_confs);
+    // NOTE: Turns out that GLX_BUFFER_SIZE is independent from X11 Visual's
+    // depth. We get all GLXFBConfigs that have an alpha channel and then
+    // itereate over them until we find one where its visual has the highest
+    // depth available.
+    int visual_id;
+    uint8_t x11_depth = 0;
+    uint8_t max_x11_depth = xcb_get_visual_max_depth (x_st->xcb_c, x_st->screen);
+    int i;
+    for (i=0; i<num_GLX_confs; i++) {
+        glXGetFBConfigAttrib (x_st->xlib_dpy, framebuffer_confs[i], GLX_VISUAL_ID, &visual_id);
+        xcb_visual_id_lookup (x_st->xcb_c, x_st->screen, visual_id, &x11_depth);
+        if (x11_depth == max_x11_depth) {
+            break;
+        }
+    }
+    GLXFBConfig framebuffer_config = framebuffer_confs[i];
+
+    x_st->depth = x11_depth;
+    x_st->visual_id = visual_id;
+
+    if (num_GLX_confs == 0 || x11_depth != max_x11_depth) {
+        printf ("Failed to get an good glXConfig.\n");
         return -1;
     }
 
-    int visual_id;
-    glXGetFBConfigAttrib (x_st->xlib_dpy, framebuffer_confs[0], GLX_VISUAL_ID, &visual_id);
+    if (max_x11_depth != 32) {
+        printf ("Can't create a window with alpha channel.\n");
+    }
 
-    x11_create_window (x_st, "Closet Maker", visual_id);
+    x11_create_window (x_st, "Closet Maker", x_st->visual_id);
 
     x11_setup_icccm_and_ewmh_protocols (x_st);
 
-    // NOTE: This must happen before making current the GL context
     xcb_map_window (x_st->xcb_c, x_st->window);
 
+    /* Set up the GL context */
     GLXWindow glX_window =
-        glXCreateWindow(x_st->xlib_dpy, framebuffer_confs[0], x_st->window, NULL);
+        glXCreateWindow(x_st->xlib_dpy, framebuffer_config, x_st->window, NULL);
     GLXContext gl_context =
-        glXCreateNewContext(x_st->xlib_dpy, framebuffer_confs[0], GLX_RGBA_TYPE, NULL, True);
+        glXCreateNewContext(x_st->xlib_dpy, framebuffer_config, GLX_RGBA_TYPE, NULL, GL_TRUE);
 
     if(!glXMakeContextCurrent(x_st->xlib_dpy, glX_window, glX_window, gl_context))
     {
