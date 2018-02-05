@@ -47,6 +47,80 @@ void MessageCallback( GLenum source,
              type, severity, message );
 }
 
+GLuint gl_program (char *vertex_shader_source, char *fragment_shader_source)
+{
+    GLuint program_id;
+    mem_pool_t pool = {0};
+
+    // Vertex shader
+    const char* vertex_source = full_file_read (&pool, vertex_shader_source);
+
+    GLuint vertex_shader = glCreateShader (GL_VERTEX_SHADER);
+    glShaderSource (vertex_shader, 1, &vertex_source, NULL);
+    glCompileShader (vertex_shader);
+    GLint shader_status;
+    glGetShaderiv (vertex_shader, GL_COMPILE_STATUS, &shader_status);
+    if (shader_status != GL_TRUE) {
+        printf ("Vertex shader compilation failed.\n");
+        char buffer[512];
+        glGetShaderInfoLog(vertex_shader, 512, NULL, buffer);
+        printf ("%s\n", buffer);
+    }
+
+    // Fragment shader
+    const char* fragment_source = full_file_read (&pool, fragment_shader_source);
+
+    GLuint fragment_shader = glCreateShader (GL_FRAGMENT_SHADER);
+    glShaderSource (fragment_shader, 1, &fragment_source, NULL);
+    glCompileShader (fragment_shader);
+    glGetShaderiv (fragment_shader, GL_COMPILE_STATUS, &shader_status);
+    if (shader_status != GL_TRUE) {
+        printf ("Fragment shader compilation failed.\n");
+        char buffer[512];
+        glGetShaderInfoLog(vertex_shader, 512, NULL, buffer);
+        printf ("%s\n", buffer);
+    }
+
+    // Program creation
+    program_id = glCreateProgram();
+    glAttachShader (program_id, vertex_shader);
+    glAttachShader (program_id, fragment_shader);
+    glBindFragDataLocation (program_id, 0, "outColor");
+    glLinkProgram (program_id);
+    glUseProgram (program_id);
+
+    mem_pool_destroy (&pool);
+    return program_id;
+}
+
+void camera_matrix (vect3_t Cx, vect3_t Cy, vect3_t Cz, vect3_t Cpos, float *matrix)
+{
+    int i = 0, j;
+    for (j=0; j<3; j++) {
+        matrix[i*4+j] = -Cx.E[j];
+    }
+
+    matrix[i*4+j] = vect3_dot (Cpos, Cx);
+
+    i = 1;
+    for (j=0; j<3; j++) {
+        matrix[i*4+j] = -Cy.E[j];
+    }
+    matrix[i*4+j] = vect3_dot (Cpos, Cy);
+
+    i = 2;
+    for (j=0; j<3; j++) {
+        matrix[i*4+j] = -Cz.E[j];
+    }
+    matrix[i*4+j] = vect3_dot (Cpos, Cz);
+
+    i = 3;
+    for (j=0; j<3; j++) {
+        matrix[i*4+j] = 0;
+    }
+    matrix[i*4+j] = 1;
+}
+
 bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_input_t input)
 {
     st->gui_st.gr = *graphics;
@@ -74,8 +148,8 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     }
 
     static bool run_once = false;
-    static GLint uni_color;
-    if (!run_once || input.force_redraw) {
+    static GLuint model_loc, view_loc;
+    if (!run_once) {
         run_once = true;
         GLboolean has_compiler;
         glGetBooleanv (GL_SHADER_COMPILER, &has_compiler);
@@ -87,93 +161,101 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
         glEnable (GL_DEBUG_OUTPUT);
         glDebugMessageCallback((GLDEBUGPROC)MessageCallback, 0);
 
-        //GLuint vao;
-        //glGenVertexArrays (1, &vao);
-        //glBindVertexArray (vao);
+        float vertices[] = {
+            -0.2f, -0.2f, -0.2f,  0.0,
+             0.2f, -0.2f, -0.2f,  0.66,
+             0.2f,  0.2f, -0.2f,  1.0,
+             0.2f,  0.2f, -0.2f,  1.0,
+            -0.2f,  0.2f, -0.2f,  0.33,
+            -0.2f, -0.2f, -0.2f,  0.0,
 
-        float vertices[] = { 0.0f,  0.5f, // Vertex 1 (X, Y)
-                            0.5f, -0.5f, // Vertex 2 (X, Y)
-                            -0.5f, -0.5f};  // Vertex 3 (X, Y)
+            -0.2f, -0.2f,  0.2f,  0.0,
+             0.2f, -0.2f,  0.2f,  0.66,
+             0.2f,  0.2f,  0.2f,  1.0,
+             0.2f,  0.2f,  0.2f,  1.0,
+            -0.2f,  0.2f,  0.2f,  0.33,
+            -0.2f, -0.2f,  0.2f,  0.0,
+
+            -0.2f,  0.2f,  0.2f,  0.66,
+            -0.2f,  0.2f, -0.2f,  1.0,
+            -0.2f, -0.2f, -0.2f,  0.33,
+            -0.2f, -0.2f, -0.2f,  0.33,
+            -0.2f, -0.2f,  0.2f,  0.0,
+            -0.2f,  0.2f,  0.2f,  0.66,
+
+             0.2f,  0.2f,  0.2f,  0.66,
+             0.2f,  0.2f, -0.2f,  1.0,
+             0.2f, -0.2f, -0.2f,  0.33,
+             0.2f, -0.2f, -0.2f,  0.33,
+             0.2f, -0.2f,  0.2f,  0.0,
+             0.2f,  0.2f,  0.2f,  0.66,
+
+            -0.2f, -0.2f, -0.2f,  0.33,
+             0.2f, -0.2f, -0.2f,  1.0,
+             0.2f, -0.2f,  0.2f,  0.66,
+             0.2f, -0.2f,  0.2f,  0.66,
+            -0.2f, -0.2f,  0.2f,  0.0,
+            -0.2f, -0.2f, -0.2f,  0.33,
+
+            -0.2f,  0.2f, -0.2f,  0.33,
+             0.2f,  0.2f, -0.2f,  1.0,
+             0.2f,  0.2f,  0.2f,  0.66,
+             0.2f,  0.2f,  0.2f,  0.66,
+            -0.2f,  0.2f,  0.2f,  0.0,
+            -0.2f,  0.2f, -0.2f,  0.33
+        };
+
+        GLuint vao;
+        glGenVertexArrays (1, &vao);
+        glBindVertexArray (vao);
+
         GLuint vbo;
-        glGenBuffers (1, &vbo); // Generate 1 buffer
+        glGenBuffers (1, &vbo);
         glBindBuffer (GL_ARRAY_BUFFER, vbo);
         glBufferData (GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
-        // Vertex shader
-        const char* vertex_source =
-            "#version 150 core\n"
-            "in vec2 position;\n"
-            "void main()\n"
-            "{\n"
-            "    gl_Position = vec4(position, 0.0, 1.0);\n"
-            "}";
+        GLint program = gl_program ("vertex_shader.glsl", "fragment_shader.glsl");
+        GLint pos_attr = glGetAttribLocation (program, "position");
+        glEnableVertexAttribArray (pos_attr);
+        glVertexAttribPointer (pos_attr, 3, GL_FLOAT, GL_FALSE, 4*sizeof(float), 0);
 
-        GLuint vertex_shader = glCreateShader (GL_VERTEX_SHADER);
-        glShaderSource (vertex_shader, 1, &vertex_source, NULL);
-        glCompileShader (vertex_shader);
-        GLint shader_status;
-        glGetShaderiv (vertex_shader, GL_COMPILE_STATUS, &shader_status);
-        if (shader_status != GL_TRUE) {
-            printf ("Vertex shader compilation failed.\n");
-            char buffer[512];
-            glGetShaderInfoLog(vertex_shader, 512, NULL, buffer);
-            printf ("%s\n", buffer);
-        }
+        GLint color_attr = glGetAttribLocation (program, "color_in");
+        glEnableVertexAttribArray (color_attr);
+        glVertexAttribPointer (color_attr, 1, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)(3*sizeof(float)));
 
-        // Fragment shader
-        const char* fragment_source =
-            "#version 150 core\n"
-            "uniform vec3 triangle_color;\n"
-            "out vec4 outColor;\n"
-            "void main()\n"
-            "{\n"
-            "    outColor = vec4(triangle_color, 1.0);\n"
-            "}";
+        model_loc = glGetUniformLocation (program, "model");
+        view_loc = glGetUniformLocation (program, "view");
 
-        GLuint fragment_shader = glCreateShader (GL_FRAGMENT_SHADER);
-        glShaderSource (fragment_shader, 1, &fragment_source, NULL);
-        glCompileShader (fragment_shader);
-        glGetShaderiv (fragment_shader, GL_COMPILE_STATUS, &shader_status);
-        if (shader_status != GL_TRUE) {
-            printf ("Fragment shader compilation failed.\n");
-            char buffer[512];
-            glGetShaderInfoLog(vertex_shader, 512, NULL, buffer);
-            printf ("%s\n", buffer);
-        }
-
-        // Program creation
-        GLuint program = glCreateProgram();
-        glAttachShader (program, vertex_shader);
-        glAttachShader (program, fragment_shader);
-        glBindFragDataLocation (program, 0, "outColor");
-        glLinkProgram (program);
-        glUseProgram (program);
-
-        GLint pos = glGetAttribLocation (program, "position");
-        glVertexAttribPointer (pos, 2, GL_FLOAT, GL_FALSE, 0, 0);
-        glEnableVertexAttribArray (pos);
-
-        uni_color = glGetUniformLocation (program, "triangle_color");
+        glEnable(GL_DEPTH_TEST);
     }
 
-    // Clear the screen to black
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
+    float rev_per_s = 0.5;
+    static float angle = M_PI/4;
+    float s = sin(angle);
+    float c = cos(angle);
+    float model[4*4] = { c, 0, s, 0,
+                         0, 1, 0, 0,
+                        -s, 0, c, 0,
+                         0, 0, 0, 1};
+    glUniformMatrix4fv (model_loc, 1, GL_FALSE, model);
+    angle += rev_per_s*2*M_PI*input.time_elapsed_ms/1000;
 
-    int static time = 0;
-    glUniform3f (uni_color, (sin(time++/9.0f) + 1.0f)/2.0f, 0.0f, 0.0f);
-    glDrawArrays (GL_TRIANGLES, 0, 3);
-
-    //static double alpha = 0;
-    //if (alpha > 1) {
-    //    alpha = 0;
+    float view[4*4];
+    camera_matrix (VECT3(1,0,0), VECT3(0,0.403,-0.91), VECT3(0,0.857,0.51), VECT3(0,-0.3,-0.5), view);
+    //int i;
+    //for (i=0; i<4; i++) {
+    //    int j;
+    //    for (j=0; j<4; j++) {
+    //        printf ("%f, ", view[i*4+j]);
+    //    }
+    //    printf ("\n");
     //}
-    //glEnable(GL_BLEND);
-    //glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-    //// NOTE: X RENDER expects premultiplied colors
-    //glClearColor(0.0*alpha, 0.0*alpha, 0.9*alpha, alpha);
-    //glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    //alpha += 0.005;
+    //printf ("\n");
+    glUniformMatrix4fv (view_loc, 1, GL_TRUE, view);
+
+    glClearColor(0.3f, 0.3f, 0.9f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glDrawArrays (GL_TRIANGLES, 0, 36);
 
     return true;
 }

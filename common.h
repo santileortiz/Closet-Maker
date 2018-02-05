@@ -613,6 +613,12 @@ typedef union {
 #define VECT3(x,y,z) ((vect3_t){{x,y,z}})
 
 static inline
+double vect3_dot (vect3_t v1, vect3_t v2)
+{
+    return v1.x*v2.x + v1.y*v2.y + v1.z*v2.z;
+}
+
+static inline
 vect3_t vect3_cross (vect3_t v1, vect3_t v2)
 {
     vect3_t res;
@@ -1310,6 +1316,34 @@ void file_read (int file, void *pos,  size_t size)
                 "asked for: %ld\n"
                 "received: %d\n", size, bytes_read);
     }
+}
+
+char* full_file_read (mem_pool_t *pool, char *path)
+{
+    char *retval = NULL;
+    char *dir_path = sh_expand (path, NULL);
+
+    struct stat st;
+    if (stat(dir_path, &st) == -1) {
+        printf ("Error reading %s: %s\n", path, strerror(errno));
+        return retval;
+    }
+
+    retval = pom_push_size (pool, st.st_size + 1);
+
+    int file = open (dir_path, O_RDONLY);
+    int bytes_read = 0;
+    do {
+        int status = read (file, retval+bytes_read, st.st_size-bytes_read);
+        if (status == -1) {
+            printf ("Error reading %s: %s\n", path, strerror(errno));
+            break;
+        }
+        bytes_read += status;
+    } while (bytes_read != st.st_size);
+    retval[st.st_size] = '\0';
+    free (dir_path);
+    return retval;
 }
 
 // NOTE: Returns false if there was an error creating the directory.
