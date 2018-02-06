@@ -93,32 +93,105 @@ GLuint gl_program (char *vertex_shader_source, char *fragment_shader_source)
     return program_id;
 }
 
-void camera_matrix (vect3_t Cx, vect3_t Cy, vect3_t Cz, vect3_t Cpos, float *matrix)
+// NOTE: Transpose before uploading to OpenGL!!
+typedef union {
+    float E[16];
+    float M[4][4]; // [down][right]
+} mat4f;
+
+static inline
+mat4f camera_matrix (vect3_t Cx, vect3_t Cy, vect3_t Cz, vect3_t Cpos)
 {
+    mat4f matrix;
     int i = 0, j;
     for (j=0; j<3; j++) {
-        matrix[i*4+j] = -Cx.E[j];
+        matrix.E[i*4+j] = Cx.E[j];
     }
 
-    matrix[i*4+j] = vect3_dot (Cpos, Cx);
+    matrix.E[i*4+j] = -vect3_dot (Cpos, Cx);
 
     i = 1;
     for (j=0; j<3; j++) {
-        matrix[i*4+j] = -Cy.E[j];
+        matrix.E[i*4+j] = Cy.E[j];
     }
-    matrix[i*4+j] = vect3_dot (Cpos, Cy);
+    matrix.E[i*4+j] = -vect3_dot (Cpos, Cy);
 
     i = 2;
     for (j=0; j<3; j++) {
-        matrix[i*4+j] = -Cz.E[j];
+        matrix.E[i*4+j] = Cz.E[j];
     }
-    matrix[i*4+j] = vect3_dot (Cpos, Cz);
+    matrix.E[i*4+j] = -vect3_dot (Cpos, Cz);
 
     i = 3;
     for (j=0; j<3; j++) {
-        matrix[i*4+j] = 0;
+        matrix.E[i*4+j] = 0;
     }
-    matrix[i*4+j] = 1;
+    matrix.E[i*4+j] = 1;
+    return matrix;
+}
+
+static inline
+mat4f look_at (vect3_t camera, vect3_t target, vect3_t up)
+{
+    vect3_t Cz = vect3_normalize (vect3_subs (target, camera));
+    vect3_t Cx = vect3_normalize (vect3_cross (Cz, up));
+    vect3_t Cy = vect3_cross (Cx, Cz);
+    return camera_matrix (Cx, Cy, Cz, camera);
+}
+
+static inline
+mat4f rotation_x (float angle_r)
+{
+    float s = sin(angle_r);
+    float c = cos(angle_r);
+    mat4f res = {{
+         1, 0, 0, 0,
+         0, c,-s, 0,
+         0, s, c, 0,
+         0, 0, 0, 1
+    }};
+    return res;
+}
+
+static inline
+mat4f rotation_y (float angle_r)
+{
+    float s = sin(angle_r);
+    float c = cos(angle_r);
+    mat4f res = {{
+         c, 0, s, 0,
+         0, 1, 0, 0,
+        -s, 0, c, 0,
+         0, 0, 0, 1
+    }};
+    return res;
+}
+
+static inline
+mat4f rotation_z (float angle_r)
+{
+    float s = sin(angle_r);
+    float c = cos(angle_r);
+    mat4f res = {{
+         c,-s, 0, 0,
+         s, c, 0, 0,
+         0, 0, 1, 0,
+         0, 0, 0, 1
+    }};
+    return res;
+}
+
+void mat4f_print (mat4f mat)
+{
+    int i;
+    for (i=0; i<4; i++) {
+        int j;
+        for (j=0; j<4; j++) {
+            printf ("%f, ", mat.E[i*4+j]);
+        }
+        printf ("\n");
+    }
+    printf ("\n");
 }
 
 bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_input_t input)
@@ -230,28 +303,20 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     }
 
     float rev_per_s = 0.5;
-    static float angle = M_PI/4;
-    float s = sin(angle);
-    float c = cos(angle);
-    float model[4*4] = { c, 0, s, 0,
-                         0, 1, 0, 0,
-                        -s, 0, c, 0,
-                         0, 0, 0, 1};
-    glUniformMatrix4fv (model_loc, 1, GL_FALSE, model);
+    static float angle = 0;
+    mat4f model = rotation_y (angle);
+    glUniformMatrix4fv (model_loc, 1, GL_TRUE, model.E);
     angle += rev_per_s*2*M_PI*input.time_elapsed_ms/1000;
 
-    float view[4*4];
-    camera_matrix (VECT3(1,0,0), VECT3(0,0.403,-0.91), VECT3(0,0.857,0.51), VECT3(0,-0.3,-0.5), view);
-    //int i;
-    //for (i=0; i<4; i++) {
-    //    int j;
-    //    for (j=0; j<4; j++) {
-    //        printf ("%f, ", view[i*4+j]);
-    //    }
-    //    printf ("\n");
-    //}
-    //printf ("\n");
-    glUniformMatrix4fv (view_loc, 1, GL_TRUE, view);
+    mat4f view = look_at (VECT3(0.3,0.3,0.3),
+                          VECT3(0,0,0),
+                          VECT3(0,1,0));
+    static bool once = true;
+    if (once) {
+        once = false;
+        mat4f_print (view);
+    }
+    glUniformMatrix4fv (view_loc, 1, GL_TRUE, view.E);
 
     glClearColor(0.3f, 0.3f, 0.9f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);

@@ -628,6 +628,34 @@ vect3_t vect3_cross (vect3_t v1, vect3_t v2)
     return res;
 }
 
+static inline
+vect3_t vect3_subs (vect3_t v1, vect3_t v2)
+{
+    vect3_t res;
+    res.x = v1.x-v2.x;
+    res.y = v1.y-v2.y;
+    res.z = v1.z-v2.z;
+    return res;
+}
+
+static inline
+double vect3_norm (vect3_t v)
+{
+    return sqrt ((v.x)*(v.x) + (v.y)*(v.y) + (v.z)*(v.z));
+}
+
+static inline
+vect3_t vect3_normalize (vect3_t v)
+{
+    vect3_t res;
+    double norm = vect3_norm (v);
+    assert (norm != 0);
+    res.x = v.x/norm;
+    res.y = v.y/norm;
+    res.z = v.z/norm;
+    return res;
+}
+
 typedef union {
     struct {
         double x;
