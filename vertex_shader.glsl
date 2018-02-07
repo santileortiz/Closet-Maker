@@ -6,6 +6,7 @@ out vec4 vert_color;
 
 uniform mat4 model;
 uniform mat4 view;
+uniform mat4 proj;
 
 void main()
 {
@@ -16,5 +17,5 @@ void main()
     } else {
         vert_color = vec4(vec3(1,1,1)*color_in,1);
     }
-    gl_Position = view * model * vec4(position, 1.0);
+    gl_Position = proj * view * model * vec4(position, 1.0);
 }

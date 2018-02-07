@@ -55,7 +55,8 @@ void MessageCallback( GLenum source,
 
 GLuint gl_program (const char *vertex_shader_source, const char *fragment_shader_source)
 {
-    GLuint program_id;
+    bool compilation_failed = false;
+    GLuint program_id = 0;
     mem_pool_t pool = {0};
 
     // Vertex shader
@@ -71,6 +72,7 @@ GLuint gl_program (const char *vertex_shader_source, const char *fragment_shader
         char buffer[512];
         glGetShaderInfoLog(vertex_shader, 512, NULL, buffer);
         printf ("%s\n", buffer);
+        compilation_failed = true;
     }
 
     // Fragment shader
@@ -85,15 +87,18 @@ GLuint gl_program (const char *vertex_shader_source, const char *fragment_shader
         char buffer[512];
         glGetShaderInfoLog(vertex_shader, 512, NULL, buffer);
         printf ("%s\n", buffer);
+        compilation_failed = true;
     }
 
     // Program creation
-    program_id = glCreateProgram();
-    glAttachShader (program_id, vertex_shader);
-    glAttachShader (program_id, fragment_shader);
-    glBindFragDataLocation (program_id, 0, "outColor");
-    glLinkProgram (program_id);
-    glUseProgram (program_id);
+    if (!compilation_failed) {
+        program_id = glCreateProgram();
+        glAttachShader (program_id, vertex_shader);
+        glAttachShader (program_id, fragment_shader);
+        glBindFragDataLocation (program_id, 0, "outColor");
+        glLinkProgram (program_id);
+        glUseProgram (program_id);
+    }
 
     mem_pool_destroy (&pool);
     return program_id;
@@ -148,8 +153,8 @@ mat4f look_at (vect3_t camera, vect3_t target, vect3_t up)
 static inline
 mat4f rotation_x (float angle_r)
 {
-    float s = sin(angle_r);
-    float c = cos(angle_r);
+    float s = sinf(angle_r);
+    float c = cosf(angle_r);
     mat4f res = {{
          1, 0, 0, 0,
          0, c,-s, 0,
@@ -176,8 +181,8 @@ mat4f rotation_y (float angle_r)
 static inline
 mat4f rotation_z (float angle_r)
 {
-    float s = sin(angle_r);
-    float c = cos(angle_r);
+    float s = sinf(angle_r);
+    float c = cosf(angle_r);
     mat4f res = {{
          c,-s, 0, 0,
          s, c, 0, 0,
@@ -227,7 +232,7 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     }
 
     static bool run_once = false;
-    static GLuint model_loc, view_loc;
+    static GLuint model_loc, view_loc, proj_loc;
     if (!run_once) {
         run_once = true;
         GLboolean has_compiler;
@@ -294,6 +299,9 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
         glBufferData (GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
         GLint program = gl_program ("vertex_shader.glsl", "fragment_shader.glsl");
+        if (!program) {
+            st->end_execution = true;
+        }
         GLint pos_attr = glGetAttribLocation (program, "position");
         glEnableVertexAttribArray (pos_attr);
         glVertexAttribPointer (pos_attr, 3, GL_FLOAT, GL_FALSE, 4*sizeof(float), 0);
@@ -304,34 +312,34 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
 
         model_loc = glGetUniformLocation (program, "model");
         view_loc = glGetUniformLocation (program, "view");
+        proj_loc = glGetUniformLocation (program, "proj");
 
         glEnable(GL_DEPTH_TEST);
     }
 
-    BEGIN_CPU_CLOCK;
     float rev_per_s = 0.5;
     static float angle = 0;
     angle += (2*M_PI*rev_per_s*input.time_elapsed_ms)/1000;
 
-    PROBE_CPU_CLOCK("Startup");
     mat4f model = rotation_y (angle);
-    PROBE_CPU_CLOCK("Model Matrix creation");
-
     glUniformMatrix4fv (model_loc, 1, GL_TRUE, model.E);
-    PROBE_CPU_CLOCK("Model Matrix upload");
 
     mat4f view = look_at (VECT3(0.3,0.3,0.3),
                           VECT3(0,0,0),
                           VECT3(0,1,0));
-    PROBE_CPU_CLOCK("View Matrix creation");
-
     glUniformMatrix4fv (view_loc, 1, GL_TRUE, view.E);
-    PROBE_CPU_CLOCK("View Matrix upload");
+
+    mat4f projection = {{
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    }};
+    glUniformMatrix4fv (proj_loc, 1, GL_TRUE, projection.E);
 
     glClearColor(0.3f, 0.3f, 0.9f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glDrawArrays (GL_TRIANGLES, 0, 36);
-    PROBE_CPU_CLOCK("OpenGL Clear and render");
 
     return true;
 }
