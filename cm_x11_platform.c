@@ -34,6 +34,12 @@
 
 #include "app_api.h"
 
+uint64_t rdtsc(){
+    unsigned int lo,hi;
+    __asm__ __volatile__ ("rdtsc" : "=a" (lo), "=d" (hi));
+    return ((uint64_t)hi << 32) | lo;
+}
+
 void MessageCallback( GLenum source,
                       GLenum type,
                       GLuint id,
@@ -47,7 +53,7 @@ void MessageCallback( GLenum source,
              type, severity, message );
 }
 
-GLuint gl_program (char *vertex_shader_source, char *fragment_shader_source)
+GLuint gl_program (const char *vertex_shader_source, const char *fragment_shader_source)
 {
     GLuint program_id;
     mem_pool_t pool = {0};
@@ -156,8 +162,8 @@ mat4f rotation_x (float angle_r)
 static inline
 mat4f rotation_y (float angle_r)
 {
-    float s = sin(angle_r);
-    float c = cos(angle_r);
+    float s = sinf(angle_r);
+    float c = cosf(angle_r);
     mat4f res = {{
          c, 0, s, 0,
          0, 1, 0, 0,
@@ -302,25 +308,30 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
         glEnable(GL_DEPTH_TEST);
     }
 
+    BEGIN_CPU_CLOCK;
     float rev_per_s = 0.5;
     static float angle = 0;
+    angle += (2*M_PI*rev_per_s*input.time_elapsed_ms)/1000;
+
+    PROBE_CPU_CLOCK("Startup");
     mat4f model = rotation_y (angle);
+    PROBE_CPU_CLOCK("Model Matrix creation");
+
     glUniformMatrix4fv (model_loc, 1, GL_TRUE, model.E);
-    angle += rev_per_s*2*M_PI*input.time_elapsed_ms/1000;
+    PROBE_CPU_CLOCK("Model Matrix upload");
 
     mat4f view = look_at (VECT3(0.3,0.3,0.3),
                           VECT3(0,0,0),
                           VECT3(0,1,0));
-    static bool once = true;
-    if (once) {
-        once = false;
-        mat4f_print (view);
-    }
+    PROBE_CPU_CLOCK("View Matrix creation");
+
     glUniformMatrix4fv (view_loc, 1, GL_TRUE, view.E);
+    PROBE_CPU_CLOCK("View Matrix upload");
 
     glClearColor(0.3f, 0.3f, 0.9f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glDrawArrays (GL_TRIANGLES, 0, 36);
+    PROBE_CPU_CLOCK("OpenGL Clear and render");
 
     return true;
 }
@@ -398,7 +409,7 @@ xcb_atom_t xcb_atoms_cache[NUM_ATOMS_CACHE];
 
 struct atom_enum_name_t {
     enum cached_atom_names_t id;
-    char *name;
+    const char *name;
 };
 
 void init_x11_atoms (struct x_state *x_st)
@@ -425,9 +436,9 @@ void init_x11_atoms (struct x_state *x_st)
 
     xcb_intern_atom_cookie_t cookies[ARRAY_SIZE(atom_arr)];
 
-    int i;
+    uint32_t i;
     for (i=0; i<ARRAY_SIZE(atom_arr); i++) {
-        char *name = atom_arr[i].name;
+        const char *name = atom_arr[i].name;
         cookies[i] = xcb_intern_atom (x_st->xcb_c, 0, strlen(name), name);
     }
 
@@ -447,7 +458,7 @@ void init_x11_atoms (struct x_state *x_st)
 char* get_x11_atom_name (xcb_connection_t *c, xcb_atom_t atom, mem_pool_t *pool)
 {
     if (atom == XCB_ATOM_NONE) {
-        return "NONE";
+        return NULL;
     }
 
     xcb_get_atom_name_cookie_t ck = xcb_get_atom_name (c, atom);
@@ -461,7 +472,7 @@ char* get_x11_atom_name (xcb_connection_t *c, xcb_atom_t atom, mem_pool_t *pool)
     char *name = xcb_get_atom_name_name (reply);
     size_t len = xcb_get_atom_name_name_length (reply);
 
-    char *res = mem_pool_push_size (pool, len+1);
+    char *res = (char*)mem_pool_push_size (pool, len+1);
     memcpy (res, name, len);
     res[len] = '\0';
 
@@ -488,7 +499,7 @@ char* get_x11_text_property (xcb_connection_t *c, mem_pool_t *pool,
                              size_t *len)
 {
 
-    xcb_get_property_reply_t *reply_1, *reply_2;
+    xcb_get_property_reply_t *reply_1, *reply_2 = NULL;
     uint32_t first_request_size = 10;
     get_x11_property_part (c, window, property, 0, first_request_size, &reply_1);
 
@@ -516,14 +527,14 @@ char* get_x11_text_property (xcb_connection_t *c, mem_pool_t *pool,
         len_total += xcb_get_property_value_length (reply_2);
     }
 
-    char *res = pom_push_size (pool, len_total+1);
+    char *res = (char*)pom_push_size (pool, len_total+1);
 
     memcpy (res, xcb_get_property_value (reply_1), len_1);
-    free (reply_1);
-    if (len_total - len_1) {
+    if (reply_1->bytes_after != 0) {
         memcpy ((char*)res+len_1, xcb_get_property_value (reply_2), len_total-len_1);
         free (reply_2);
     }
+    free (reply_1);
     res[len_total] = '\0';
 
     if (len != NULL) {
@@ -537,7 +548,7 @@ void* get_x11_property (xcb_connection_t *c, mem_pool_t *pool, xcb_drawable_t wi
                         xcb_atom_t property, size_t *len, xcb_atom_t *type)
 {
 
-    xcb_get_property_reply_t *reply_1, *reply_2;
+    xcb_get_property_reply_t *reply_1, *reply_2 = NULL;
     uint32_t first_request_size = 10;
     get_x11_property_part (c, window, property, 0, first_request_size, &reply_1);
     uint32_t len_1 = *len = xcb_get_property_value_length (reply_1);
@@ -551,11 +562,11 @@ void* get_x11_property (xcb_connection_t *c, mem_pool_t *pool, xcb_drawable_t wi
     *type = reply_1->type;
 
     memcpy (res, xcb_get_property_value (reply_1), len_1);
-    free (reply_1);
-    if (*len - len_1) {
+    if (reply_1->bytes_after != 0) {
         memcpy ((char*)res+len_1, xcb_get_property_value (reply_2), *len-len_1);
         free (reply_2);
     }
+    free (reply_1);
 
     return res;
 }
@@ -715,7 +726,7 @@ Visual* Visual_from_visualid (Display *dpy, xcb_visualid_t visualid)
 
 void x11_change_property (xcb_connection_t *c, xcb_drawable_t window,
                           xcb_atom_t property, xcb_atom_t type,
-                          uint32_t len, void *data,
+                          uint32_t len, const void *data,
                           bool checked)
 {
     uint8_t format = 32;
@@ -759,7 +770,7 @@ void x11_change_property (xcb_connection_t *c, xcb_drawable_t window,
     }
 }
 
-void x11_create_window (struct x_state *x_st, char *title, int visual_id)
+void x11_create_window (struct x_state *x_st, const char *title, int visual_id)
 {
     uint32_t event_mask = XCB_EVENT_MASK_EXPOSURE|XCB_EVENT_MASK_KEY_PRESS|
                              XCB_EVENT_MASK_STRUCTURE_NOTIFY|XCB_EVENT_MASK_BUTTON_PRESS|
@@ -892,7 +903,7 @@ void x11_print_window_name (struct x_state *x_st, xcb_drawable_t window)
 // invalid values. Use xcb_generic_event_t and NOT xcb_<some_event>_event_t.
 void x11_send_event (xcb_connection_t *c, xcb_drawable_t window, void *event)
 {
-    xcb_void_cookie_t ck = xcb_send_event_checked (c, 0, window, 0, event);
+    xcb_void_cookie_t ck = xcb_send_event_checked (c, 0, window, 0, (const char*)event);
     xcb_generic_error_t *error; 
     if ((error = xcb_request_check(c, ck))) { 
         printf("Error sending event. %d\n", error->error_code); 
@@ -1021,8 +1032,11 @@ int main (void)
     app_input.wheel = 1;
 
     mem_pool_t bootstrap = {0};
-    struct app_state_t *st = mem_pool_push_size_full (&bootstrap, sizeof(struct app_state_t), POOL_ZERO_INIT);
+    struct app_state_t *st =
+        (struct app_state_t*)mem_pool_push_size_full (&bootstrap, sizeof(struct app_state_t), POOL_ZERO_INIT);
     st->memory = bootstrap;
+
+    app_input.start_ticks = rdtsc ();
 
     while (!st->end_execution) {
         while ((event = xcb_poll_for_event (x_st->xcb_c))) {

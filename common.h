@@ -11,7 +11,13 @@
 #include <string.h>
 #include <wordexp.h>
 #include <math.h>
+
+#ifdef __cplusplus
+#define ZERO_INIT(type) (type){}
+#else
+#define ZERO_INIT(type) (type){0}
 typedef enum {false, true} bool;
+#endif
 
 #define ARRAY_SIZE(arr) (sizeof(arr)/sizeof((arr)[0]))
 
@@ -169,7 +175,7 @@ static inline
 char* str_non_small_alloc (string_t *str, size_t len)
 {
     str->capacity = (len+1) | 0xF; // Round up and guarantee LSB == 1
-    str->str = malloc(str->capacity);
+    str->str = (char*)malloc(str->capacity);
     return str->str;
 }
 
@@ -337,7 +343,7 @@ string_t strn_new (char *c_str, size_t len)
 }
 
 #define str_set(str,c_str) strn_set(str,(c_str),((c_str)!=NULL?strlen(c_str):0))
-void strn_set (string_t *str, char *c_str, size_t len)
+void strn_set (string_t *str, const char *c_str, size_t len)
 {
     str_maybe_grow (str, len, false);
 
@@ -728,7 +734,7 @@ void int_sort (int *arr, int n)
     }
 }
 
-void swap_n_bytes (void *a, void*b, int n)
+void swap_n_bytes (void *a, void*b, uint32_t n)
 {
     while (sizeof(int)<=n) {
         n -= sizeof(int);
@@ -827,7 +833,7 @@ void array_clear (int *arr, int n)
     }
 }
 
-void array_print_full (int *arr, int n, char *sep, char *start, char *end)
+void array_print_full (int *arr, int n, const char *sep, const char *start, const char *end)
 {
     int i;
     if (start != NULL) {
@@ -878,7 +884,7 @@ void print_u64_array (uint64_t *arr, int n)
     printf ("%"PRIu64"]\n", arr[i]);
 }
 
-void print_line (char *sep, int len)
+void print_line (const char *sep, int len)
 {
     int w = strlen(sep);
     char str[w*len+1];
@@ -891,14 +897,14 @@ void print_line (char *sep, int len)
 }
 
 struct ascii_tbl_t {
-    char* vert_sep;
-    char* hor_sep;
-    char* cross;
+    const char* vert_sep;
+    const char* hor_sep;
+    const char* cross;
     int curr_col;
     int num_cols;
 };
 
-void print_table_bar (char *hor_sep, char* cross, int *lens, int num_cols)
+void print_table_bar (const char *hor_sep, const char* cross, int *lens, int num_cols)
 {
     int i;
     for (i=0; i<num_cols-1; i++) {
@@ -989,7 +995,7 @@ typedef struct {
 
 void int_dyn_arr_init (int_dyn_arr_t *arr, uint32_t size)
 {
-    arr->data = malloc (size * sizeof (*arr->data));
+    arr->data = (int*)malloc (size * sizeof (*arr->data));
     if (!arr->data) {
         printf ("Malloc failed.\n");
     }
@@ -1007,7 +1013,7 @@ void int_dyn_arr_grow (int_dyn_arr_t *arr, uint32_t new_size)
 {
     assert (new_size < UINT32_MAX);
     int *new_data;
-    if ((new_data = realloc (arr->data, new_size * sizeof(*arr->data)))) {
+    if ((new_data = (int*)realloc (arr->data, new_size * sizeof(*arr->data)))) {
         arr->data = new_data;
         arr->size = new_size;
     } else {
@@ -1041,7 +1047,7 @@ void int_dyn_arr_insert_and_shift (int_dyn_arr_t *arr, uint32_t pos, int element
         int_dyn_arr_grow (arr, 2*arr->size);
     }
     
-    int i;
+    uint32_t i;
     for (i=arr->len; i>pos; i--) {
         arr->data[i] = arr->data[i-1];
     }
@@ -1049,18 +1055,18 @@ void int_dyn_arr_insert_and_shift (int_dyn_arr_t *arr, uint32_t pos, int element
     arr->len++;
 }
 
-void int_dyn_arr_insert_multiple_and_shift (int_dyn_arr_t *arr, uint32_t pos, int *elements, int len)
+void int_dyn_arr_insert_multiple_and_shift (int_dyn_arr_t *arr, uint32_t pos, int *elements, uint32_t len)
 {
     assert (pos < arr->len);
     if (arr->len + len > arr->size) {
-        int new_size = arr->size;
+        uint32_t new_size = arr->size;
         while (new_size < arr->len + len) {
             new_size *= 2;
         }
         int_dyn_arr_grow (arr, new_size);
     }
 
-    int i;
+    uint32_t i;
     for (i=arr->len+len-1; i>pos+len-1; i--) {
         arr->data[i] = arr->data[i-len];
     }
@@ -1126,7 +1132,7 @@ void cont_buff_destroy (cont_buff_t *buff)
 }
 
 // Memory pool that grows as needed, and can be freed easily.
-#define MEM_POOL_MIN_BIN_SIZE 1024
+#define MEM_POOL_MIN_BIN_SIZE 1024u
 typedef struct {
     uint32_t min_bin_size;
     uint32_t size;
@@ -1158,7 +1164,7 @@ enum alloc_opts {
 #define mem_pool_push_struct(pool, type) mem_pool_push_size(pool, sizeof(type))
 #define mem_pool_push_array(pool, n, type) mem_pool_push_size(pool, (n)*sizeof(type))
 #define mem_pool_push_size(pool, size) mem_pool_push_size_full(pool, size, POOL_UNINITIALIZED)
-void* mem_pool_push_size_full (mem_pool_t *pool, int size, enum alloc_opts opts)
+void* mem_pool_push_size_full (mem_pool_t *pool, uint32_t size, enum alloc_opts opts)
 {
     if (pool->used + size >= pool->size) {
         pool->num_bins++;
@@ -1304,7 +1310,7 @@ char* collapse_str_arr (char **arr, int n, mem_pool_t *pool)
     for (i=0; i<n; i++) {
         len += strlen (arr[i]) + 1;
     }
-    char *res = pom_push_size (pool, len);
+    char *res = (char*)pom_push_size (pool, len);
 
     char *ptr = res;
     for (i=0; i<n; i++) {
@@ -1320,7 +1326,7 @@ char* collapse_str_arr (char **arr, int n, mem_pool_t *pool)
 // Expand _str_ as bash would, allocate it in _pool_ or heap. 
 // NOTE: $(<cmd>) and `<cmd>` work but don't get too crazy, this spawns /bin/sh
 // and a subprocess. Using env vars like $HOME, or ~/ doesn't.
-char* sh_expand (char *str, mem_pool_t *pool)
+char* sh_expand (const char *str, mem_pool_t *pool)
 {
     wordexp_t out;
     wordexp (str, &out, 0);
@@ -1329,14 +1335,14 @@ char* sh_expand (char *str, mem_pool_t *pool)
     return res;
 }
 
-void file_write (int file, void *pos,  size_t size)
+void file_write (int file, void *pos,  ssize_t size)
 {
     if (write (file, pos, size) < size) {
         printf ("Write interrupted\n");
     }
 }
 
-void file_read (int file, void *pos,  size_t size)
+void file_read (int file, void *pos,  ssize_t size)
 {
     int bytes_read = read (file, pos, size);
     if (bytes_read < size) {
@@ -1346,7 +1352,7 @@ void file_read (int file, void *pos,  size_t size)
     }
 }
 
-char* full_file_read (mem_pool_t *pool, char *path)
+char* full_file_read (mem_pool_t *pool, const char *path)
 {
     char *retval = NULL;
     char *dir_path = sh_expand (path, NULL);
@@ -1357,7 +1363,7 @@ char* full_file_read (mem_pool_t *pool, char *path)
         return retval;
     }
 
-    retval = pom_push_size (pool, st.st_size + 1);
+    retval = (char*)pom_push_size (pool, st.st_size + 1);
 
     int file = open (dir_path, O_RDONLY);
     int bytes_read = 0;
@@ -1408,7 +1414,7 @@ char* change_extension (mem_pool_t *pool, char *path, char *new_ext)
     while (i>0 && path[i-1] != '.') {
         i--;
     }
-    char *res = mem_pool_push_size (pool, path_len+strlen(new_ext)+1);
+    char *res = (char*)mem_pool_push_size (pool, path_len+strlen(new_ext)+1);
     strcpy (res, path);
     strcpy (&res[i], new_ext);
     return res;
@@ -1417,7 +1423,7 @@ char* change_extension (mem_pool_t *pool, char *path, char *new_ext)
 char* add_extension (mem_pool_t *pool, char *path, char *new_ext)
 {
     size_t path_len = strlen(path);
-    char *res = mem_pool_push_size (pool, path_len+strlen(new_ext)+2);
+    char *res = (char*)mem_pool_push_size (pool, path_len+strlen(new_ext)+2);
     strcpy (res, path);
     res[path_len++] = '.';
     strcpy (&res[path_len], new_ext);

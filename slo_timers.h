@@ -32,7 +32,7 @@ void setup_clocks ()
     return;
 }
 
-void print_time_elapsed (struct timespec *time_start, struct timespec *time_end, char *str)
+void print_time_elapsed (struct timespec *time_start, struct timespec *time_end, char const *str)
 {
     float time_in_ms = (time_end->tv_sec*1000-time_start->tv_sec*1000+
                        (float)(time_end->tv_nsec-time_start->tv_nsec)/1000000);
@@ -55,16 +55,19 @@ float time_elapsed_in_ms (struct timespec *time_start, struct timespec *time_end
 
 // Process clock
 // Usage:
-//   BEGIN_TIME_BLOCK;
+//   BEGIN_CPU_BLOCK;
 //   <some code to measure>
-//   END_TIME_BLOCK("Name of timed block");
+//   PROBE_CPU_CLOCK("Name of probe 1");
+//   <some code to measure>
+//   PROBE_CPU_CLOCK("Name of probe 2");
 
 struct timespec proc_ticks_start;
 struct timespec proc_ticks_end;
-#define BEGIN_TIME_BLOCK {clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &proc_ticks_start);}
-#define END_TIME_BLOCK(str) {\
+#define BEGIN_CPU_CLOCK {clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &proc_ticks_start);}
+#define PROBE_CPU_CLOCK(str) {\
     clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &proc_ticks_end);\
     print_time_elapsed(&proc_ticks_start, &proc_ticks_end, str);\
+    proc_ticks_start = proc_ticks_end;\
     }
 
 // Wall timer

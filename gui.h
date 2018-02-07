@@ -22,6 +22,7 @@ typedef struct {
 
 // TODO: Do per platform too.
 typedef struct {
+    uint64_t start_ticks;
     float time_elapsed_ms;
 
     bool force_redraw;
@@ -77,6 +78,7 @@ typedef enum {
 } css_text_align_t;
 
 typedef enum {
+    CSS_FONT_WEIGHT_NONE,
     CSS_FONT_WEIGHT_NORMAL,
     CSS_FONT_WEIGHT_BOLD
 } css_font_weight_t;
@@ -217,7 +219,7 @@ struct behavior_t {
 };
 
 struct font_style_t {
-    char *family;
+    const char *family;
     int size;
     css_font_weight_t weight;
 };
@@ -307,7 +309,8 @@ void init_title_label (mem_pool_t *pool, struct css_box_t *box);
 
 void default_gui_init (struct gui_state_t *gui_st)
 {
-    gui_st->layout_boxes = mem_pool_push_array (&gui_st->pool, NUM_LAYOUT_BOXES_ALLOCATED, layout_box_t);
+    gui_st->layout_boxes =
+        (layout_box_t*)mem_pool_push_array (&gui_st->pool, NUM_LAYOUT_BOXES_ALLOCATED, layout_box_t);
     gui_st->focused_layout_box = -1;
 
     gui_st->default_font_style.family = "Open Sans";
@@ -386,7 +389,7 @@ void int_string_append_digit (uint64_string_t *x, int digit)
 {
     x->i = x->i*10 + digit;
 
-    char digit_c_str[] = {0x30+digit, '\0'};
+    char digit_c_str[] = {(char)(0x30+digit), '\0'};
     string_t str_digit = str_new (digit_c_str);
     str_cat (&x->str, &str_digit);
     str_free (&str_digit);
@@ -613,16 +616,16 @@ void select_str (struct gui_state_t *gui_st, layout_box_t *lay_box, char* str, i
 void selector_set (struct layout_box_t *lay_box, css_selector_t sel)
 {
     if (!(lay_box->active_selectors & sel)) {
-        lay_box->active_selectors |= sel;
-        lay_box->changed_selectors |= sel;
+        lay_box->active_selectors =  (css_selector_t)(lay_box->active_selectors | sel);
+        lay_box->changed_selectors = (css_selector_t)(lay_box->changed_selectors | sel);
     }
 }
 
 void selector_unset (struct layout_box_t *lay_box, css_selector_t sel)
 {
     if (lay_box->active_selectors & sel) {
-        lay_box->active_selectors &= ~sel;
-        lay_box->changed_selectors |= sel;
+        lay_box->active_selectors = (css_selector_t)(lay_box->active_selectors & ~sel);
+        lay_box->changed_selectors = (css_selector_t)(lay_box->active_selectors | sel);
     }
 }
 
@@ -633,7 +636,8 @@ void focus_chain_add (struct gui_state_t *gui_st, layout_box_t *lay_box)
         new_focus = gui_st->freed_focus_elements;
         gui_st->freed_focus_elements = new_focus->prev;
     } else {
-        new_focus = mem_pool_push_struct (&gui_st->pool, struct focus_element_t);
+        new_focus =
+            (struct focus_element_t*)mem_pool_push_struct (&gui_st->pool, struct focus_element_t);
     }
 
     new_focus->dest = lay_box;
@@ -646,7 +650,7 @@ void focus_chain_add (struct gui_state_t *gui_st, layout_box_t *lay_box)
         // NOTE: We don't call selector_set() because we don't want to trigger
         // things as if the user had just focused the first element in the
         // chain, (we did).
-        lay_box->active_selectors |= CSS_SEL_FOCUS;
+        lay_box->active_selectors = (css_selector_t)(lay_box->active_selectors|CSS_SEL_FOCUS);
 
         struct css_box_t *focus_style =
             gui_st->css_styles[lay_box->base_style_id].selector_focus;
@@ -767,23 +771,24 @@ void update_selectors (struct gui_state_t *gui_st, layout_box_t *layout_boxes, i
         css_selector_t old = curr_box->active_selectors;
         if (!(curr_box->active_selectors & CSS_SEL_DISABLED)) {
             if (gui_st->input.mouse_down[0] && is_ptr_inside && click_started_inside) {
-                curr_box->active_selectors |= CSS_SEL_ACTIVE;
+                curr_box->active_selectors = (css_selector_t)(curr_box->active_selectors | CSS_SEL_ACTIVE);
             } else {
-                curr_box->active_selectors &= ~CSS_SEL_ACTIVE;
+                curr_box->active_selectors = (css_selector_t)(curr_box->active_selectors & ~CSS_SEL_ACTIVE);
             }
         }
 
         if (is_ptr_inside) {
-            curr_box->active_selectors |= CSS_SEL_HOVER;
+            curr_box->active_selectors = (css_selector_t)(curr_box->active_selectors | CSS_SEL_HOVER);
         } else {
-            curr_box->active_selectors &= ~CSS_SEL_HOVER;
+            curr_box->active_selectors = (css_selector_t)(curr_box->active_selectors & ~CSS_SEL_HOVER);
         }
 
         if (gui_st->mouse_clicked[0] && is_ptr_inside) {
             focus_set (gui_st, curr_box);
         }
 
-        curr_box->changed_selectors |= (old ^ curr_box->active_selectors);
+        curr_box->changed_selectors =
+            (css_selector_t)(curr_box->changed_selectors | (old ^ curr_box->active_selectors));
     }
 }
 
@@ -871,7 +876,7 @@ void layout_boxes_end_frame (layout_box_t *layout_boxes, int len)
 {
     int i;
     for (i=0; i<len; i++) {
-        layout_boxes[i].changed_selectors = 0;
+        layout_boxes[i].changed_selectors = (css_selector_t)0;
         layout_boxes[i].content_changed = false;
 
 #if 0
@@ -887,8 +892,9 @@ void layout_boxes_end_frame (layout_box_t *layout_boxes, int len)
 void add_behavior (struct gui_state_t *gui_st, layout_box_t *box, enum behavior_type_t type, void *target)
 {
     struct behavior_t *new_behavior =
-        mem_pool_push_size_full (&gui_st->pool, sizeof(struct behavior_t),
-                                 POOL_ZERO_INIT);
+        (struct behavior_t*)mem_pool_push_size_full (&gui_st->pool,
+                                                     sizeof(struct behavior_t),
+                                                     POOL_ZERO_INIT);
     new_behavior->next = gui_st->behaviors;
     gui_st->behaviors = new_behavior;
     new_behavior->type = type;
@@ -898,25 +904,32 @@ void add_behavior (struct gui_state_t *gui_st, layout_box_t *box, enum behavior_
 }
 
 #define new_pango_layout_from_style_fsw(cr,family,size,weight) \
-    new_pango_layout_from_style(cr, &FONT_STYLE_FSW(family,size,weight))
-PangoLayout* new_pango_layout_from_style (cairo_t *cr, struct font_style_t *font_style)
+    new_pango_layout_from_style(cr, FONT_STYLE_FSW(family,size,weight))
+PangoLayout* new_pango_layout_from_style (cairo_t *cr, struct font_style_t font_style)
 {
-    char *font_family;
-    if (font_style->family == NULL) {
+    const char *font_family;
+    if (font_style.family == NULL) {
         font_family = global_gui_st->default_font_style.family;
     } else {
-        font_family = font_style->family;
+        font_family = font_style.family;
     }
 
     int font_size;
-    if (font_style->size == 0) {
+    if (font_style.size == 0) {
         font_size = global_gui_st->default_font_style.size;
     } else {
-        font_size = font_style->size;
+        font_size = font_style.size;
     }
 
-    PangoWeight font_weight;
-    switch (font_style->weight) {
+    css_font_weight_t css_font_weight;
+    if (font_style.weight == CSS_FONT_WEIGHT_NONE) {
+        css_font_weight = global_gui_st->default_font_style.weight;
+    } else {
+        css_font_weight = font_style.weight;
+    }
+
+    PangoWeight font_weight = PANGO_WEIGHT_NORMAL;
+    switch (css_font_weight) {
         case CSS_FONT_WEIGHT_BOLD:
             font_weight = PANGO_WEIGHT_BOLD;
             break;
@@ -924,7 +937,7 @@ PangoLayout* new_pango_layout_from_style (cairo_t *cr, struct font_style_t *font
             font_weight = PANGO_WEIGHT_NORMAL;
             break;
         default:
-            font_weight = global_gui_st->default_font_style.weight;
+            invalid_code_path;
             break;
     }
 
@@ -988,7 +1001,7 @@ void render_text (cairo_t *cr, vect2_t pos, struct font_style_t *font_style,
                   char *str, size_t len, vect4_t *color, vect4_t *bg_color,
                   vect2_t *out_pos)
 {
-    PangoLayout *text_layout = new_pango_layout_from_style (cr, font_style);
+    PangoLayout *text_layout = new_pango_layout_from_style (cr, *font_style);
     pango_layout_set_text (text_layout, str, len);
 
     PangoRectangle logical;
@@ -1094,7 +1107,7 @@ void css_gaussian_blur (cairo_surface_t *image, double r)
     cairo_surface_flush (image);
     int size = 2*r+1;
     uint8_t kernel[size];
-    int i;
+    uint32_t i;
     uint32_t area = 0;
     double mu = ARRAY_SIZE(kernel)/2;
     for (i=0; i<ARRAY_SIZE(kernel); i++) {
@@ -1103,16 +1116,16 @@ void css_gaussian_blur (cairo_surface_t *image, double r)
     }
 
     uint32_t *src = (uint32_t*)cairo_image_surface_get_data (image);
-    int src_width = cairo_image_surface_get_width (image);
-    int src_height = cairo_image_surface_get_height (image);
+    uint32_t src_width = cairo_image_surface_get_width (image);
+    uint32_t src_height = cairo_image_surface_get_height (image);
     cairo_surface_t *tmp_surface =
         cairo_image_surface_create (CAIRO_FORMAT_ARGB32, src_width, src_height);
     uint32_t *tmp = (uint32_t*)cairo_image_surface_get_data (tmp_surface);
 
     for (i=0; i<src_height; i++) {
-        int j;
+        uint32_t j;
         for (j=0; j<src_width; j++) {
-            int k;
+            uint32_t k;
             uint32_t a = 0, r = 0, g = 0, b = 0;
             for (k=0; k<ARRAY_SIZE(kernel); k++) {
                 if (j - ARRAY_SIZE(kernel)/2 + k < 0) {
@@ -1136,11 +1149,11 @@ void css_gaussian_blur (cairo_surface_t *image, double r)
         }
     }
 
-    int j;
+    uint32_t j;
     for (j=0; j<src_width; j++) {
-        int i;
+        uint32_t i;
         for (i=0; i<src_height; i++) {
-            int k;
+            uint32_t k;
             uint32_t a = 0, r = 0, g = 0, b = 0;
             for (k=0; k<ARRAY_SIZE(kernel); k++) {
                 if (i - ARRAY_SIZE(kernel)/2 + k < 0) {
@@ -1305,7 +1318,7 @@ void draw_text_shadows (app_graphics_t *gr, struct css_box_t *css,
             shadow_pos.y += curr_shadow->v_offset;
             render_text (cr, shadow_pos, &font_style, str, len, &curr_shadow->color, NULL, NULL);
         } else {
-            PangoLayout *text_layout = new_pango_layout_from_style (cr, &font_style);
+            PangoLayout *text_layout = new_pango_layout_from_style (cr, font_style);
             PangoRectangle logical;
             pango_layout_set_text (text_layout, str, len);
             pango_layout_get_pixel_extents (text_layout, NULL, &logical);
@@ -1426,9 +1439,8 @@ void css_box_draw (app_graphics_t *gr, struct css_box_t *box, layout_box_t *layo
 
         struct font_style_t font_style = FONT_STYLE_CSS(box);
         if (selection->dest == layout) {
-            size_t len = strlen (layout->content.str);
             assert (layout->content.str >= selection->start &&
-                    selection->start <= layout->content.str + len &&
+                    selection->start <= layout->content.str + strlen (layout->content.str) &&
                     "selection->start must point into selection->dest->content.str");
 
             if (selection->start != layout->content.str) {
@@ -1467,7 +1479,7 @@ void css_add_text_shadow (mem_pool_t *pool, struct css_box_t *css,
                           double blur_radius, vect4_t color)
 {
     struct text_shadow_t *new_text_shadow =
-        mem_pool_push_size (pool, sizeof (struct text_shadow_t));
+        (struct text_shadow_t*)mem_pool_push_size (pool, sizeof (struct text_shadow_t));
     new_text_shadow->h_offset = h_offset;
     new_text_shadow->v_offset = v_offset;
     new_text_shadow->blur_radius = blur_radius;
@@ -1483,7 +1495,7 @@ void css_add_box_shadow (mem_pool_t *pool, struct css_box_t *css,
                          vect4_t color)
 {
     struct box_shadow_t *new_box_shadow =
-        mem_pool_push_size (pool, sizeof (struct box_shadow_t));
+        (struct box_shadow_t*)mem_pool_push_size (pool, sizeof (struct box_shadow_t));
     new_box_shadow->h_offset = h_offset;
     new_box_shadow->v_offset = v_offset;
     new_box_shadow->blur_radius = blur_radius;
@@ -1532,11 +1544,10 @@ void rgba_to_hsla (vect4_t *rgba, vect4_t *hsla)
         }
     } else if (max == rgba->g) {
         hsla->h = (60*(rgba->b-rgba->r)/(max-min) + 120);
-    } else if (max == rgba->b) {
+    } else { // if (max == rgba->b)
         hsla->h = (60*(rgba->r-rgba->g)/(max-min) + 240);
-    } else {
-        invalid_code_path;
     }
+
     hsla->h /= 360; // h\in[0,1]
 
     hsla->l = (max+min)/2;
@@ -1640,11 +1651,11 @@ vect4_t mix (vect4_t *c1, vect4_t *c2, double f)
     return ret;
 }
 
-void hsv_to_rgb (vect3_t *hsv, vect3_t *rgb)
+void hsv_to_rgb (vect3_t hsv, vect3_t *rgb)
 {
-    double h = hsv->E[0];
-    double s = hsv->E[1];
-    double v = hsv->E[2];
+    double h = hsv.E[0];
+    double s = hsv.E[1];
+    double v = hsv.E[2];
     assert (h <= 1 && s <= 1 && v <= 1);
 
     int h_i = (int)(h*6);
@@ -1737,7 +1748,7 @@ vect3_t color_palette[9] = {
 void get_next_color (vect3_t *color)
 {
     static double h = COLOR_OFFSET;
-    static int palette_idx = 0;
+    static uint32_t palette_idx = 0;
 
     // Reset color palette
     if (color == NULL) {
@@ -1754,13 +1765,13 @@ void get_next_color (vect3_t *color)
         if (h>1) {
             h -= 1;
         }
-        hsv_to_rgb (&VECT3(h, 0.8, 0.7), color);
+        hsv_to_rgb (VECT3(h, 0.8, 0.7), color);
     }
 }
 
 void init_button (mem_pool_t *pool, struct css_box_t *box)
 {
-    *box = (struct css_box_t){0};
+    *box = ZERO_INIT(struct css_box_t);
     box->border_width = 1;
     box->padding_x = 12;
     box->padding_y = 3;
@@ -1783,7 +1794,7 @@ void init_button (mem_pool_t *pool, struct css_box_t *box)
 
 void init_button_active (mem_pool_t *pool, struct css_box_t *box)
 {
-    *box = (struct css_box_t){0};
+    *box = ZERO_INIT(struct css_box_t);
     box->border_radius = 2.5;
     box->border_width = 1;
     box->padding_x = 12;
@@ -1800,7 +1811,7 @@ void init_button_active (mem_pool_t *pool, struct css_box_t *box)
 
 void init_button_disabled (mem_pool_t *pool, struct css_box_t *box)
 {
-    *box = (struct css_box_t){0};
+    *box = ZERO_INIT(struct css_box_t);
     box->border_radius = 2.5;
     box->border_width = 1;
     box->padding_x = 12;
@@ -1817,7 +1828,7 @@ void init_button_disabled (mem_pool_t *pool, struct css_box_t *box)
 
 void init_suggested_action_button (mem_pool_t *pool, struct css_box_t *box)
 {
-    *box = (struct css_box_t){0};
+    *box = ZERO_INIT(struct css_box_t);
     // Inherited
     box->border_radius = 2.5;
     box->border_width = 1;
@@ -1842,7 +1853,7 @@ void init_suggested_action_button (mem_pool_t *pool, struct css_box_t *box)
 
 void init_suggested_action_button_active (mem_pool_t *pool, struct css_box_t *box)
 {
-    *box = (struct css_box_t){0};
+    *box = ZERO_INIT(struct css_box_t);
     // Inherited
     box->border_radius = 2.5;
     box->border_width = 1;
@@ -1862,7 +1873,7 @@ void init_suggested_action_button_active (mem_pool_t *pool, struct css_box_t *bo
 
 void init_background (mem_pool_t *pool, struct css_box_t *box)
 {
-    *box = (struct css_box_t){0};
+    *box = ZERO_INIT(struct css_box_t);
     box->border_radius = 2.5;
     box->border_width = 1;
     box->padding_x = 12;
@@ -1873,7 +1884,7 @@ void init_background (mem_pool_t *pool, struct css_box_t *box)
 
 void init_text_entry (mem_pool_t *pool, struct css_box_t *box)
 {
-    *box = (struct css_box_t){0};
+    *box = ZERO_INIT(struct css_box_t);
     box->border_radius = 2.5;
     box->border_width = 1;
     box->padding_x = 3;
@@ -1894,7 +1905,7 @@ void init_text_entry (mem_pool_t *pool, struct css_box_t *box)
 
 void init_text_entry_focused (mem_pool_t *pool, struct css_box_t *box)
 {
-    *box = (struct css_box_t){0};
+    *box = ZERO_INIT(struct css_box_t);
     // Inherited
     box->border_radius = 2.5;
     box->border_width = 1;
@@ -1916,14 +1927,14 @@ void init_text_entry_focused (mem_pool_t *pool, struct css_box_t *box)
 
 void init_label (mem_pool_t *pool, struct css_box_t *box)
 {
-    *box = (struct css_box_t){0};
+    *box = ZERO_INIT(struct css_box_t);
     box->background_color = RGBA(0, 0, 0, 0);
     box->color = text_color;
 }
 
 void init_title_label (mem_pool_t *pool, struct css_box_t *box)
 {
-    *box = (struct css_box_t){0};
+    *box = ZERO_INIT(struct css_box_t);
     box->background_color = RGBA(0, 0, 0, 0);
     box->color = text_color_primary;
     box->font_weight = CSS_FONT_WEIGHT_BOLD;
