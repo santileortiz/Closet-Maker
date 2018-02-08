@@ -415,8 +415,8 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     glUniformMatrix4fv (view_loc, 1, GL_TRUE, view.E);
     //mat4f view = camera_matrix (VECT3(1,0,0), VECT3(0,1,0), VECT3(0,0,1), VECT3(0,0,0.3));
 
-    float width_m = 700 / (1000 * (float)graphics->x_dpi);
-    float height_m = 700 / (1000 *(float)graphics->y_dpi);
+    float width_m = graphics->width / (1000 * (float)graphics->x_dpi);
+    float height_m = graphics->height / (1000 *(float)graphics->y_dpi);
     mat4f projection = perspective_projection (-width_m/2, width_m/2, -height_m/2, height_m/2, 0.1, 10);
 #endif
     glUniformMatrix4fv (proj_loc, 1, GL_TRUE, projection.E);
@@ -1258,6 +1258,7 @@ int main (void)
                     {
                         graphics.width = ((xcb_configure_notify_event_t*)event)->width;
                         graphics.height = ((xcb_configure_notify_event_t*)event)->height;
+                        glViewport (0,0, graphics.width, graphics.height);
                     } break;
                 case XCB_MOTION_NOTIFY:
                     {
