@@ -6,6 +6,7 @@
 // sudo apt-get install libxcb1-dev libcairo2-dev
 #include <X11/Xlib-xcb.h>
 #include <xcb/sync.h>
+#include <xcb/randr.h>
 #include <X11/Xutil.h>
 #include <stdio.h>
 #include <string.h>
@@ -129,9 +130,9 @@ mat4f camera_matrix (vect3_t Cx, vect3_t Cy, vect3_t Cz, vect3_t Cpos)
 
     i = 2;
     for (j=0; j<3; j++) {
-        matrix.E[i*4+j] = Cz.E[j];
+        matrix.E[i*4+j] = -Cz.E[j];
     }
-    matrix.E[i*4+j] = -vect3_dot (Cpos, Cz);
+    matrix.E[i*4+j] = vect3_dot (Cpos, Cz);
 
     i = 3;
     for (j=0; j<3; j++) {
@@ -144,9 +145,9 @@ mat4f camera_matrix (vect3_t Cx, vect3_t Cy, vect3_t Cz, vect3_t Cpos)
 static inline
 mat4f look_at (vect3_t camera, vect3_t target, vect3_t up)
 {
-    vect3_t Cz = vect3_normalize (vect3_subs (target, camera));
-    vect3_t Cx = vect3_normalize (vect3_cross (Cz, up));
-    vect3_t Cy = vect3_cross (Cx, Cz);
+    vect3_t Cz = vect3_normalize (vect3_subs (camera, target));
+    vect3_t Cx = vect3_normalize (vect3_cross (up, Cz));
+    vect3_t Cy = vect3_cross (Cz, Cx);
     return camera_matrix (Cx, Cy, Cz, camera);
 }
 
@@ -205,6 +206,77 @@ void mat4f_print (mat4f mat)
     printf ("\n");
 }
 
+static inline
+mat4f perspective_projection (float left, float right, float bottom, float top, float near, float far)
+{
+    // NOTE: There are several conventions for the semantics of the near and far
+    // arguments to this function:
+    //  - OpenGL assumes them to be distances to the camera and fails if either
+    //    near or far is negative. This may be confusing because the other
+    //    values are assumed to be coordinates and near and far are not,
+    //    otherwise they would be negative because OpenGL uses RH coordinates.
+    //  - We can make all argumets be the coordinates, then if the near plane or
+    //    far plane coordinates are positive we throw an error.
+    //  - A third approach is to mix both of them by taking the absolute value
+    //    of the near and far plane and never fail. This works fine if they are
+    //    interpreted as being Z coordinates, or distances to the camera at the
+    //    cost of computing two absolute values.
+    near = fabs (near);
+    far = fabs (far);
+
+    float a = 2*near/(right-left);
+    float b = -(right+left)/(right-left);
+
+    float c = 2*near/(top-bottom);
+    float d = -(top+bottom)/(top-bottom);
+
+    float e = (near+far)/(far-near);
+    float f = -2*far*near/(far-near);
+
+    mat4f res = {{
+        a, 0, b, 0,
+        0, c, d, 0,
+        0, 0, e, f,
+        0, 0, 1, 0,
+    }};
+    return res;
+}
+
+static inline
+mat4f mat4f_mult (mat4f mat1, mat4f mat2)
+{
+    mat4f res = ZERO_INIT(mat4f);
+    int i;
+    for (i=0; i<4; i++) {
+        int j;
+        for (j=0; j<4; j++) {
+            int k;
+            for (k=0; k<4; k++) {
+                res.M[i][j] += mat1.M[i][k] * mat2.M[k][j];
+            }
+        }
+    }
+    return res;
+}
+
+static inline
+vect3_t mat4f_times_point (mat4f mat, vect3_t p)
+{
+    vect3_t res = VECT3(0,0,0);
+    int i;
+    for (i=0; i<3; i++) {
+        int j;
+        for (j=0; j<3; j++) {
+            res.E[i] += mat.M[i][j] * p.E[j];
+        }
+    }
+
+    for (i=0; i<3; i++) {
+        res.E[i] += mat.M[i][3];
+    }
+    return res;
+}
+
 bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_input_t input)
 {
     st->gui_st.gr = *graphics;
@@ -246,47 +318,47 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
         glDebugMessageCallback((GLDEBUGPROC)MessageCallback, 0);
 
         float vertices[] = {
-            -0.2f, -0.2f, -0.2f,  0.0,
-             0.2f, -0.2f, -0.2f,  0.66,
-             0.2f,  0.2f, -0.2f,  1.0,
-             0.2f,  0.2f, -0.2f,  1.0,
-            -0.2f,  0.2f, -0.2f,  0.33,
-            -0.2f, -0.2f, -0.2f,  0.0,
+            -0.5f, -0.5f, -0.5f,  0.0,
+             0.5f, -0.5f, -0.5f,  0.66,
+             0.5f,  0.5f, -0.5f,  1.0,
+             0.5f,  0.5f, -0.5f,  1.0,
+            -0.5f,  0.5f, -0.5f,  0.33,
+            -0.5f, -0.5f, -0.5f,  0.0,
 
-            -0.2f, -0.2f,  0.2f,  0.0,
-             0.2f, -0.2f,  0.2f,  0.66,
-             0.2f,  0.2f,  0.2f,  1.0,
-             0.2f,  0.2f,  0.2f,  1.0,
-            -0.2f,  0.2f,  0.2f,  0.33,
-            -0.2f, -0.2f,  0.2f,  0.0,
+            -0.5f, -0.5f,  0.5f,  0.0,
+             0.5f, -0.5f,  0.5f,  0.66,
+             0.5f,  0.5f,  0.5f,  1.0,
+             0.5f,  0.5f,  0.5f,  1.0,
+            -0.5f,  0.5f,  0.5f,  0.33,
+            -0.5f, -0.5f,  0.5f,  0.0,
 
-            -0.2f,  0.2f,  0.2f,  0.66,
-            -0.2f,  0.2f, -0.2f,  1.0,
-            -0.2f, -0.2f, -0.2f,  0.33,
-            -0.2f, -0.2f, -0.2f,  0.33,
-            -0.2f, -0.2f,  0.2f,  0.0,
-            -0.2f,  0.2f,  0.2f,  0.66,
+            -0.5f,  0.5f,  0.5f,  0.66,
+            -0.5f,  0.5f, -0.5f,  1.0,
+            -0.5f, -0.5f, -0.5f,  0.33,
+            -0.5f, -0.5f, -0.5f,  0.33,
+            -0.5f, -0.5f,  0.5f,  0.0,
+            -0.5f,  0.5f,  0.5f,  0.66,
 
-             0.2f,  0.2f,  0.2f,  0.66,
-             0.2f,  0.2f, -0.2f,  1.0,
-             0.2f, -0.2f, -0.2f,  0.33,
-             0.2f, -0.2f, -0.2f,  0.33,
-             0.2f, -0.2f,  0.2f,  0.0,
-             0.2f,  0.2f,  0.2f,  0.66,
+             0.5f,  0.5f,  0.5f,  0.66,
+             0.5f,  0.5f, -0.5f,  1.0,
+             0.5f, -0.5f, -0.5f,  0.33,
+             0.5f, -0.5f, -0.5f,  0.33,
+             0.5f, -0.5f,  0.5f,  0.0,
+             0.5f,  0.5f,  0.5f,  0.66,
 
-            -0.2f, -0.2f, -0.2f,  0.33,
-             0.2f, -0.2f, -0.2f,  1.0,
-             0.2f, -0.2f,  0.2f,  0.66,
-             0.2f, -0.2f,  0.2f,  0.66,
-            -0.2f, -0.2f,  0.2f,  0.0,
-            -0.2f, -0.2f, -0.2f,  0.33,
+            -0.5f, -0.5f, -0.5f,  0.33,
+             0.5f, -0.5f, -0.5f,  1.0,
+             0.5f, -0.5f,  0.5f,  0.66,
+             0.5f, -0.5f,  0.5f,  0.66,
+            -0.5f, -0.5f,  0.5f,  0.0,
+            -0.5f, -0.5f, -0.5f,  0.33,
 
-            -0.2f,  0.2f, -0.2f,  0.33,
-             0.2f,  0.2f, -0.2f,  1.0,
-             0.2f,  0.2f,  0.2f,  0.66,
-             0.2f,  0.2f,  0.2f,  0.66,
-            -0.2f,  0.2f,  0.2f,  0.0,
-            -0.2f,  0.2f, -0.2f,  0.33
+            -0.5f,  0.5f, -0.5f,  0.33,
+             0.5f,  0.5f, -0.5f,  1.0,
+             0.5f,  0.5f,  0.5f,  0.66,
+             0.5f,  0.5f,  0.5f,  0.66,
+            -0.5f,  0.5f,  0.5f,  0.0,
+            -0.5f,  0.5f, -0.5f,  0.33
         };
 
         GLuint vao;
@@ -324,6 +396,7 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     mat4f model = rotation_y (angle);
     glUniformMatrix4fv (model_loc, 1, GL_TRUE, model.E);
 
+#if 0
     mat4f view = look_at (VECT3(0.3,0.3,0.3),
                           VECT3(0,0,0),
                           VECT3(0,1,0));
@@ -333,9 +406,53 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
         1, 0, 0, 0,
         0, 1, 0, 0,
         0, 0, 1, 0,
-        0, 0, 0, 1,
+        0, 0, 0, 1
     }};
+#else
+    mat4f view = look_at (VECT3(2.5,2.5,2.5),
+                          VECT3(0,0,0),
+                          VECT3(0,1,0));
+    glUniformMatrix4fv (view_loc, 1, GL_TRUE, view.E);
+    //mat4f view = camera_matrix (VECT3(1,0,0), VECT3(0,1,0), VECT3(0,0,1), VECT3(0,0,0.3));
+
+    float width_m = 700 / (1000 * (float)graphics->x_dpi);
+    float height_m = 700 / (1000 *(float)graphics->y_dpi);
+    mat4f projection = perspective_projection (-width_m/2, width_m/2, -height_m/2, height_m/2, 0.1, 10);
+#endif
     glUniformMatrix4fv (proj_loc, 1, GL_TRUE, projection.E);
+
+    static bool once = true;
+    if (once) {
+        once = false;
+        //mat4f a = {{
+        //    1, 2, 3, 4,
+        //    5, 6, 7, 8,
+        //    9,10,11,12,
+        //   13,14,15,16
+        //}};
+        //mat4f b = {{
+        //    1, 2, 3, 4,
+        //    5, 6, 7, 8,
+        //    9,10,11,12,
+        //   13,14,15,16
+        //}};
+
+        //vect3_t v = VECT3 (4,3,2);
+        //vect3_t pc = mat4f_times_point (a, v);
+
+        mat4f_print (model);
+        mat4f_print (view);
+        mat4f_print (projection);
+
+        mat4f transf = mat4f_mult (mat4f_mult (projection, view), model);
+        mat4f_print (transf);
+        vect3_t pc = mat4f_times_point (transf, VECT3 (0.2, 0.2, 0.2));
+        int i;
+        for (i=0; i<3; i++) {
+            printf ("%f ", pc.E[i]);
+        }
+        printf ("\n");
+    }
 
     glClearColor(0.3f, 0.3f, 0.9f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -919,6 +1036,90 @@ void x11_send_event (xcb_connection_t *c, xcb_drawable_t window, void *event)
     }
 }
 
+void x11_get_screen_dpi (struct x_state *x_st, float *x_dpi, float *y_dpi)
+{
+    const xcb_query_extension_reply_t * render_info =
+        xcb_get_extension_data (x_st->xcb_c, &xcb_randr_id);
+
+    if (!render_info->present) {
+        *x_dpi = x_st->screen->width_in_pixels * 25.4 / (float)x_st->screen->width_in_millimeters;
+        *y_dpi = x_st->screen->height_in_pixels * 25.4 / (float)x_st->screen->height_in_millimeters;
+        printf ("No RANDR extension, computing DPI from X11 screen object. It's probably wrong.\n");
+        return;
+    }
+
+    xcb_randr_get_screen_resources_cookie_t ck =
+        xcb_randr_get_screen_resources (x_st->xcb_c, x_st->window);
+    xcb_generic_error_t *error = NULL;
+    xcb_randr_get_screen_resources_reply_t *get_resources_reply =
+        xcb_randr_get_screen_resources_reply (x_st->xcb_c, ck, &error);
+    if (error) {
+        printf("RANDR: Error getting screen resources. %d\n", error->error_code);
+        free(error);
+        return;
+    }
+
+    xcb_randr_output_t *outputs =
+        xcb_randr_get_screen_resources_outputs (get_resources_reply);
+    int num_outputs =
+        xcb_randr_get_screen_resources_outputs_length  (get_resources_reply);
+
+    // TODO: Compute in which CRTC is x_st->window. ATM we assume there is only
+    // one output and use that.
+    int num_active_outputs = 0;
+    xcb_randr_output_t output = 0;
+    int i;
+    for (i=0; i<num_outputs; i++) {
+        xcb_randr_get_output_info_cookie_t ck =
+            xcb_randr_get_output_info (x_st->xcb_c, outputs[i], XCB_CURRENT_TIME);
+        xcb_randr_get_output_info_reply_t *output_info =
+            xcb_randr_get_output_info_reply (x_st->xcb_c, ck, &error);
+        if (error) {
+            printf("RANDR: Error getting output info. %d\n", error->error_code);
+            free(error);
+            return;
+        }
+
+        if (output_info->crtc) {
+            num_active_outputs++;
+            if (output == 0) {
+                output = outputs[i];
+            }
+        }
+    }
+
+    if (num_active_outputs != 1) {
+        printf ("There are more than 1 outputs, we may be setting the DPI of the wrong one.\n");
+    }
+
+    xcb_randr_get_output_info_reply_t *output_info;
+    {
+        xcb_randr_get_output_info_cookie_t ck =
+            xcb_randr_get_output_info (x_st->xcb_c, output, XCB_CURRENT_TIME);
+        output_info = xcb_randr_get_output_info_reply (x_st->xcb_c, ck, &error);
+        if (error) {
+            printf("RANDR: Error getting output info. %d\n", error->error_code);
+            free(error);
+            return;
+        }
+    }
+
+    xcb_randr_get_crtc_info_reply_t *crtc_info;
+    {
+        xcb_randr_get_crtc_info_cookie_t ck =
+            xcb_randr_get_crtc_info (x_st->xcb_c, output_info->crtc, XCB_CURRENT_TIME);
+        crtc_info = xcb_randr_get_crtc_info_reply (x_st->xcb_c, ck, &error);
+        if (error) {
+            printf("RANDR: Error getting crtc info. %d\n", error->error_code);
+            free(error);
+            return;
+        }
+    }
+
+    *x_dpi = crtc_info->width / (float)output_info->mm_width;
+    *y_dpi = crtc_info->height / (float)output_info->mm_height;
+}
+
 int main (void)
 {
     // Setup clocks
@@ -1028,6 +1229,7 @@ int main (void)
     app_graphics_t graphics;
     graphics.width = WINDOW_WIDTH;
     graphics.height = WINDOW_HEIGHT;
+    x11_get_screen_dpi (x_st, &graphics.x_dpi, &graphics.y_dpi);
     bool force_blit = false;
 
     float frame_rate = 60;

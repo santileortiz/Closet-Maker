@@ -18,6 +18,8 @@ typedef struct {
     cairo_t *cr;
     uint16_t width;
     uint16_t height;
+    float x_dpi;
+    float y_dpi;
 } app_graphics_t;
 
 // TODO: Do per platform too.

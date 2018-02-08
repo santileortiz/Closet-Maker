@@ -645,6 +645,16 @@ vect3_t vect3_subs (vect3_t v1, vect3_t v2)
 }
 
 static inline
+vect3_t vect3_mult (vect3_t v, float k)
+{
+    vect3_t res;
+    res.x = v.x*k;
+    res.y = v.y*k;
+    res.z = v.z*k;
+    return res;
+}
+
+static inline
 double vect3_norm (vect3_t v)
 {
     return sqrt ((v.x)*(v.x) + (v.y)*(v.y) + (v.z)*(v.z));

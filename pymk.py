@@ -8,6 +8,7 @@ DEP_FLAGS = '-lGL ' \
             '-lX11 ' \
             '-lxcb ' \
             '-lxcb-sync ' \
+            '-lxcb-randr ' \
             '-lm '
 
 # NOTE: This is too much just to depend on Pango, maybe move to HarfBuzz?
