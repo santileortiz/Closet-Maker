@@ -111,6 +111,7 @@ typedef union {
     float M[4][4]; // [down][right]
 } mat4f;
 
+// NOTE: Camera will be looking towards -Cz.
 static inline
 mat4f camera_matrix (vect3_t Cx, vect3_t Cy, vect3_t Cz, vect3_t Cpos)
 {
@@ -304,7 +305,7 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     }
 
     static bool run_once = false;
-    static GLuint model_loc, view_loc, proj_loc;
+    static GLuint model_loc, view_loc, proj_loc, override_loc;
     if (!run_once) {
         run_once = true;
         GLboolean has_compiler;
@@ -318,6 +319,7 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
         glDebugMessageCallback((GLDEBUGPROC)MessageCallback, 0);
 
         float vertices[] = {
+            // Cube
             -0.5f, -0.5f, -0.5f,  0.0,
              0.5f, -0.5f, -0.5f,  0.66,
              0.5f,  0.5f, -0.5f,  1.0,
@@ -358,7 +360,15 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
              0.5f,  0.5f,  0.5f,  0.66,
              0.5f,  0.5f,  0.5f,  0.66,
             -0.5f,  0.5f,  0.5f,  0.0,
-            -0.5f,  0.5f, -0.5f,  0.33
+            -0.5f,  0.5f, -0.5f,  0.33,
+
+            // Floor
+            -1.0f, -0.5f, -1.0f, 0.0f,
+             1.0f, -0.5f, -1.0f, 0.0f,
+             1.0f, -0.5f,  1.0f, 0.0f,
+             1.0f, -0.5f,  1.0f, 0.0f,
+            -1.0f, -0.5f,  1.0f, 0.0f,
+            -1.0f, -0.5f, -1.0f, 0.0f
         };
 
         GLuint vao;
@@ -385,6 +395,9 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
         model_loc = glGetUniformLocation (program, "model");
         view_loc = glGetUniformLocation (program, "view");
         proj_loc = glGetUniformLocation (program, "proj");
+
+        override_loc = glGetUniformLocation (program, "color_override");
+        glUniform1f (override_loc, 1.0f);
 
         glEnable(GL_DEPTH_TEST);
     }
@@ -457,6 +470,35 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     glClearColor(0.3f, 0.3f, 0.9f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glDrawArrays (GL_TRIANGLES, 0, 36);
+
+    glEnable(GL_STENCIL_TEST);
+
+    glStencilFunc (GL_ALWAYS, 1, 0xFF);
+    glStencilOp (GL_KEEP, GL_KEEP, GL_REPLACE);
+    glStencilMask (0xFF);
+    glDepthMask(GL_FALSE);
+    glClear (GL_STENCIL_BUFFER_BIT);
+
+    glDrawArrays(GL_TRIANGLES, 36, 6);
+
+    glStencilFunc (GL_EQUAL, 1, 0xFF);
+    glStencilMask (0x00);
+    glDepthMask(GL_TRUE);
+
+    mat4f reflection_trans = {{
+        1, 0, 0, 0,
+        0,-1, 0,-1,
+        0, 0, 1, 0,
+        0, 0, 0, 1
+    }};
+    mat4f reflection_model = mat4f_mult (reflection_trans, model);
+
+    glUniformMatrix4fv (model_loc, 1, GL_TRUE, reflection_model.E);
+
+    glUniform1f (override_loc, 0.2f);
+    glDrawArrays (GL_TRIANGLES, 0, 36);
+    glUniform1f (override_loc, 1.0f);
+    glDisable(GL_STENCIL_TEST);
 
     return true;
 }
@@ -1170,6 +1212,7 @@ int main (void)
                          GLX_GREEN_SIZE, 8,
                          GLX_BLUE_SIZE, 8,
                          GLX_ALPHA_SIZE, 8,
+                         GLX_STENCIL_SIZE, 8,
                          GL_NONE};
     GLXFBConfig* framebuffer_confs =
         glXChooseFBConfig (x_st->xlib_dpy, default_screen, attrib_list, &num_GLX_confs);
@@ -1192,6 +1235,7 @@ int main (void)
 
     x_st->depth = x11_depth;
     x_st->visual_id = visual_id;
+    printf ("Visual ID: %x\n", visual_id);
 
     if (num_GLX_confs == 0 || x11_depth != max_x11_depth) {
         printf ("Failed to get an good glXConfig.\n");
