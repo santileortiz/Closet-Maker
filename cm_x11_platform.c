@@ -278,194 +278,142 @@ vect3_t mat4f_times_point (mat4f mat, vect3_t p)
     return res;
 }
 
-bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_input_t input)
+struct cube_scene_t {
+    GLuint program_id;
+    GLuint model_loc;
+    GLuint view_loc;
+    GLuint proj_loc;
+    GLuint override_loc;
+
+    float rev_per_s;
+    float angle;
+};
+
+struct cube_scene_t init_cube_scene (float rev_per_s)
 {
-    st->gui_st.gr = *graphics;
-    if (!st->is_initialized) {
-        st->end_execution = false;
-        st->is_initialized = true;
+    struct cube_scene_t scene;
+
+    float vertices[] = {
+                        // Cube
+        -0.5f, -0.5f, -0.5f,  0.0,
+        0.5f, -0.5f, -0.5f,  0.66,
+        0.5f,  0.5f, -0.5f,  1.0,
+        0.5f,  0.5f, -0.5f,  1.0,
+        -0.5f,  0.5f, -0.5f,  0.33,
+        -0.5f, -0.5f, -0.5f,  0.0,
+
+        -0.5f, -0.5f,  0.5f,  0.0,
+        0.5f, -0.5f,  0.5f,  0.66,
+        0.5f,  0.5f,  0.5f,  1.0,
+        0.5f,  0.5f,  0.5f,  1.0,
+        -0.5f,  0.5f,  0.5f,  0.33,
+        -0.5f, -0.5f,  0.5f,  0.0,
+
+        -0.5f,  0.5f,  0.5f,  0.66,
+        -0.5f,  0.5f, -0.5f,  1.0,
+        -0.5f, -0.5f, -0.5f,  0.33,
+        -0.5f, -0.5f, -0.5f,  0.33,
+        -0.5f, -0.5f,  0.5f,  0.0,
+        -0.5f,  0.5f,  0.5f,  0.66,
+
+        0.5f,  0.5f,  0.5f,  0.66,
+        0.5f,  0.5f, -0.5f,  1.0,
+        0.5f, -0.5f, -0.5f,  0.33,
+        0.5f, -0.5f, -0.5f,  0.33,
+        0.5f, -0.5f,  0.5f,  0.0,
+        0.5f,  0.5f,  0.5f,  0.66,
+
+        -0.5f, -0.5f, -0.5f,  0.33,
+        0.5f, -0.5f, -0.5f,  1.0,
+        0.5f, -0.5f,  0.5f,  0.66,
+        0.5f, -0.5f,  0.5f,  0.66,
+        -0.5f, -0.5f,  0.5f,  0.0,
+        -0.5f, -0.5f, -0.5f,  0.33,
+
+        -0.5f,  0.5f, -0.5f,  0.33,
+        0.5f,  0.5f, -0.5f,  1.0,
+        0.5f,  0.5f,  0.5f,  0.66,
+        0.5f,  0.5f,  0.5f,  0.66,
+        -0.5f,  0.5f,  0.5f,  0.0,
+        -0.5f,  0.5f, -0.5f,  0.33,
+
+        // Floor
+        -1.0f, -0.5f, -1.0f, 0.0f,
+        1.0f, -0.5f, -1.0f, 0.0f,
+        1.0f, -0.5f,  1.0f, 0.0f,
+        1.0f, -0.5f,  1.0f, 0.0f,
+        -1.0f, -0.5f,  1.0f, 0.0f,
+        -1.0f, -0.5f, -1.0f, 0.0f
+    };
+
+    GLuint vao;
+    glGenVertexArrays (1, &vao);
+    glBindVertexArray (vao);
+
+    GLuint vbo;
+    glGenBuffers (1, &vbo);
+    glBindBuffer (GL_ARRAY_BUFFER, vbo);
+    glBufferData (GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+    scene.program_id = gl_program ("vertex_shader.glsl", "fragment_shader.glsl");
+    if (!scene.program_id) {
+        return scene;
     }
+    GLint pos_attr = glGetAttribLocation (scene.program_id, "position");
+    glEnableVertexAttribArray (pos_attr);
+    glVertexAttribPointer (pos_attr, 3, GL_FLOAT, GL_FALSE, 4*sizeof(float), 0);
 
-    //bool blit_needed = false;
+    GLint color_attr = glGetAttribLocation (scene.program_id, "color_in");
+    glEnableVertexAttribArray (color_attr);
+    glVertexAttribPointer (color_attr, 1, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)(3*sizeof(float)));
 
-    update_input (&st->gui_st, input);
 
-    switch (st->gui_st.input.keycode) {
-        case 24: //KEY_Q
-            st->end_execution = true;
-            // NOTE: We want modes to be called once after we end execution
-            // so they can do their own cleanup.
-            break;
-        default:
-            //if (input.keycode >= 8) {
-            //    printf ("%" PRIu8 "\n", input.keycode);
-            //    //printf ("%" PRIu16 "\n", input.modifiers);
-            //}
-            break;
-    }
+    scene.model_loc = glGetUniformLocation (scene.program_id, "model");
+    scene.view_loc = glGetUniformLocation (scene.program_id, "view");
+    scene.proj_loc = glGetUniformLocation (scene.program_id, "proj");
+    scene.override_loc = glGetUniformLocation (scene.program_id, "color_override");
 
-    static bool run_once = false;
-    static GLuint model_loc, view_loc, proj_loc, override_loc;
-    if (!run_once) {
-        run_once = true;
-        GLboolean has_compiler;
-        glGetBooleanv (GL_SHADER_COMPILER, &has_compiler);
-        assert (has_compiler == GL_TRUE);
+    scene.angle = 0;
+    scene.rev_per_s = rev_per_s;
 
-        glClearColor(0.0, 0.0, 0.0, 1);
-        glClear(GL_COLOR_BUFFER_BIT);
+    glUniform1f (scene.override_loc, 1.0f);
 
-        glEnable (GL_DEBUG_OUTPUT);
-        glDebugMessageCallback((GLDEBUGPROC)MessageCallback, 0);
+    glEnable(GL_DEPTH_TEST);
+    return scene;
+}
 
-        float vertices[] = {
-            // Cube
-            -0.5f, -0.5f, -0.5f,  0.0,
-             0.5f, -0.5f, -0.5f,  0.66,
-             0.5f,  0.5f, -0.5f,  1.0,
-             0.5f,  0.5f, -0.5f,  1.0,
-            -0.5f,  0.5f, -0.5f,  0.33,
-            -0.5f, -0.5f, -0.5f,  0.0,
+void render_cube_scene (struct cube_scene_t *cube_scene, app_input_t *input, app_graphics_t *graphics)
+{
+    glUseProgram (cube_scene->program_id);
+    cube_scene->angle += (2*M_PI*cube_scene->rev_per_s*input->time_elapsed_ms)/1000;
 
-            -0.5f, -0.5f,  0.5f,  0.0,
-             0.5f, -0.5f,  0.5f,  0.66,
-             0.5f,  0.5f,  0.5f,  1.0,
-             0.5f,  0.5f,  0.5f,  1.0,
-            -0.5f,  0.5f,  0.5f,  0.33,
-            -0.5f, -0.5f,  0.5f,  0.0,
-
-            -0.5f,  0.5f,  0.5f,  0.66,
-            -0.5f,  0.5f, -0.5f,  1.0,
-            -0.5f, -0.5f, -0.5f,  0.33,
-            -0.5f, -0.5f, -0.5f,  0.33,
-            -0.5f, -0.5f,  0.5f,  0.0,
-            -0.5f,  0.5f,  0.5f,  0.66,
-
-             0.5f,  0.5f,  0.5f,  0.66,
-             0.5f,  0.5f, -0.5f,  1.0,
-             0.5f, -0.5f, -0.5f,  0.33,
-             0.5f, -0.5f, -0.5f,  0.33,
-             0.5f, -0.5f,  0.5f,  0.0,
-             0.5f,  0.5f,  0.5f,  0.66,
-
-            -0.5f, -0.5f, -0.5f,  0.33,
-             0.5f, -0.5f, -0.5f,  1.0,
-             0.5f, -0.5f,  0.5f,  0.66,
-             0.5f, -0.5f,  0.5f,  0.66,
-            -0.5f, -0.5f,  0.5f,  0.0,
-            -0.5f, -0.5f, -0.5f,  0.33,
-
-            -0.5f,  0.5f, -0.5f,  0.33,
-             0.5f,  0.5f, -0.5f,  1.0,
-             0.5f,  0.5f,  0.5f,  0.66,
-             0.5f,  0.5f,  0.5f,  0.66,
-            -0.5f,  0.5f,  0.5f,  0.0,
-            -0.5f,  0.5f, -0.5f,  0.33,
-
-            // Floor
-            -1.0f, -0.5f, -1.0f, 0.0f,
-             1.0f, -0.5f, -1.0f, 0.0f,
-             1.0f, -0.5f,  1.0f, 0.0f,
-             1.0f, -0.5f,  1.0f, 0.0f,
-            -1.0f, -0.5f,  1.0f, 0.0f,
-            -1.0f, -0.5f, -1.0f, 0.0f
-        };
-
-        GLuint vao;
-        glGenVertexArrays (1, &vao);
-        glBindVertexArray (vao);
-
-        GLuint vbo;
-        glGenBuffers (1, &vbo);
-        glBindBuffer (GL_ARRAY_BUFFER, vbo);
-        glBufferData (GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-
-        GLint program = gl_program ("vertex_shader.glsl", "fragment_shader.glsl");
-        if (!program) {
-            st->end_execution = true;
-        }
-        GLint pos_attr = glGetAttribLocation (program, "position");
-        glEnableVertexAttribArray (pos_attr);
-        glVertexAttribPointer (pos_attr, 3, GL_FLOAT, GL_FALSE, 4*sizeof(float), 0);
-
-        GLint color_attr = glGetAttribLocation (program, "color_in");
-        glEnableVertexAttribArray (color_attr);
-        glVertexAttribPointer (color_attr, 1, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)(3*sizeof(float)));
-
-        model_loc = glGetUniformLocation (program, "model");
-        view_loc = glGetUniformLocation (program, "view");
-        proj_loc = glGetUniformLocation (program, "proj");
-
-        override_loc = glGetUniformLocation (program, "color_override");
-        glUniform1f (override_loc, 1.0f);
-
-        glEnable(GL_DEPTH_TEST);
-    }
-
-    float rev_per_s = 0.5;
-    static float angle = 0;
-    angle += (2*M_PI*rev_per_s*input.time_elapsed_ms)/1000;
-
-    mat4f model = rotation_y (angle);
-    glUniformMatrix4fv (model_loc, 1, GL_TRUE, model.E);
+    mat4f model = rotation_y (cube_scene->angle);
+    glUniformMatrix4fv (cube_scene->model_loc, 1, GL_TRUE, model.E);
 
 #if 0
     mat4f view = look_at (VECT3(0.3,0.3,0.3),
                           VECT3(0,0,0),
                           VECT3(0,1,0));
-    glUniformMatrix4fv (view_loc, 1, GL_TRUE, view.E);
+    glUniformMatrix4fv (cube_scene->view_loc, 1, GL_TRUE, view.E);
 
     mat4f projection = {{
-        1, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1
+      0.4,  0,  0, 0,
+        0,0.4,  0, 0,
+        0,  0,0.1, 0,
+        0,  0,  0, 1
     }};
 #else
     mat4f view = look_at (VECT3(2.5,2.5,2.5),
                           VECT3(0,0,0),
                           VECT3(0,1,0));
-    glUniformMatrix4fv (view_loc, 1, GL_TRUE, view.E);
+    glUniformMatrix4fv (cube_scene->view_loc, 1, GL_TRUE, view.E);
     //mat4f view = camera_matrix (VECT3(1,0,0), VECT3(0,1,0), VECT3(0,0,1), VECT3(0,0,0.3));
 
     float width_m = graphics->width / (1000 * (float)graphics->x_dpi);
     float height_m = graphics->height / (1000 *(float)graphics->y_dpi);
     mat4f projection = perspective_projection (-width_m/2, width_m/2, -height_m/2, height_m/2, 0.1, 10);
 #endif
-    glUniformMatrix4fv (proj_loc, 1, GL_TRUE, projection.E);
-
-    static bool once = true;
-    if (once) {
-        once = false;
-        //mat4f a = {{
-        //    1, 2, 3, 4,
-        //    5, 6, 7, 8,
-        //    9,10,11,12,
-        //   13,14,15,16
-        //}};
-        //mat4f b = {{
-        //    1, 2, 3, 4,
-        //    5, 6, 7, 8,
-        //    9,10,11,12,
-        //   13,14,15,16
-        //}};
-
-        //vect3_t v = VECT3 (4,3,2);
-        //vect3_t pc = mat4f_times_point (a, v);
-
-        mat4f_print (model);
-        mat4f_print (view);
-        mat4f_print (projection);
-
-        mat4f transf = mat4f_mult (mat4f_mult (projection, view), model);
-        mat4f_print (transf);
-        vect3_t pc = mat4f_times_point (transf, VECT3 (0.2, 0.2, 0.2));
-        int i;
-        for (i=0; i<3; i++) {
-            printf ("%f ", pc.E[i]);
-        }
-        printf ("\n");
-    }
+    glUniformMatrix4fv (cube_scene->proj_loc, 1, GL_TRUE, projection.E);
 
     glClearColor(0.3f, 0.3f, 0.9f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -493,12 +441,51 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     }};
     mat4f reflection_model = mat4f_mult (reflection_trans, model);
 
-    glUniformMatrix4fv (model_loc, 1, GL_TRUE, reflection_model.E);
+    glUniformMatrix4fv (cube_scene->model_loc, 1, GL_TRUE, reflection_model.E);
 
-    glUniform1f (override_loc, 0.2f);
+    glUniform1f (cube_scene->override_loc, 0.2f);
     glDrawArrays (GL_TRIANGLES, 0, 36);
-    glUniform1f (override_loc, 1.0f);
+    glUniform1f (cube_scene->override_loc, 1.0f);
     glDisable(GL_STENCIL_TEST);
+}
+
+bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_input_t input)
+{
+    bool blit_needed = false;
+    st->gui_st.gr = *graphics;
+    if (!st->is_initialized) {
+        st->end_execution = false;
+        st->is_initialized = true;
+    }
+
+    update_input (&st->gui_st, input);
+
+    switch (st->gui_st.input.keycode) {
+        case 24: //KEY_Q
+            st->end_execution = true;
+            // NOTE: We want modes to be called once after we end execution
+            // so they can do their own cleanup.
+            break;
+        default:
+            //if (input.keycode >= 8) {
+            //    printf ("%" PRIu8 "\n", input.keycode);
+            //    //printf ("%" PRIu16 "\n", input.modifiers);
+            //}
+            break;
+    }
+
+    static struct cube_scene_t cube_scene;
+    static bool run_once = false;
+    if (!run_once) {
+        run_once = true;
+        cube_scene = init_cube_scene(0.5);
+        if (cube_scene.program_id == 0) {
+            st->end_execution = true;
+            return blit_needed;
+        }
+    }
+
+    render_cube_scene (&cube_scene, &input, graphics);
 
     return true;
 }
@@ -1235,7 +1222,6 @@ int main (void)
 
     x_st->depth = x11_depth;
     x_st->visual_id = visual_id;
-    printf ("Visual ID: %x\n", visual_id);
 
     if (num_GLX_confs == 0 || x11_depth != max_x11_depth) {
         printf ("Failed to get an good glXConfig.\n");
@@ -1266,6 +1252,13 @@ int main (void)
         printf("glXMakeContextCurrent() failed\n");
         return -1;
     }
+
+    GLboolean has_compiler;
+    glGetBooleanv (GL_SHADER_COMPILER, &has_compiler);
+    assert (has_compiler == GL_TRUE);
+
+    glEnable (GL_DEBUG_OUTPUT);
+    glDebugMessageCallback((GLDEBUGPROC)MessageCallback, 0);
 
     // ////////////////
     // Main event loop
