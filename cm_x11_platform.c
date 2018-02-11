@@ -96,7 +96,7 @@ GLuint gl_program (const char *vertex_shader_source, const char *fragment_shader
         program_id = glCreateProgram();
         glAttachShader (program_id, vertex_shader);
         glAttachShader (program_id, fragment_shader);
-        glBindFragDataLocation (program_id, 0, "outColor");
+        glBindFragDataLocation (program_id, 0, "out_color");
         glLinkProgram (program_id);
         glUseProgram (program_id);
     }
@@ -284,6 +284,7 @@ struct cube_scene_t {
     GLuint view_loc;
     GLuint proj_loc;
     GLuint override_loc;
+    GLuint vao_cube;
 
     float rev_per_s;
     float angle;
@@ -346,9 +347,8 @@ struct cube_scene_t init_cube_scene (float rev_per_s)
         -1.0f, -0.5f, -1.0f, 0.0f
     };
 
-    GLuint vao;
-    glGenVertexArrays (1, &vao);
-    glBindVertexArray (vao);
+    glGenVertexArrays (1, &scene.vao_cube);
+    glBindVertexArray (scene.vao_cube);
 
     GLuint vbo;
     glGenBuffers (1, &vbo);
@@ -378,13 +378,14 @@ struct cube_scene_t init_cube_scene (float rev_per_s)
 
     glUniform1f (scene.override_loc, 1.0f);
 
-    glEnable(GL_DEPTH_TEST);
     return scene;
 }
 
 void render_cube_scene (struct cube_scene_t *cube_scene, app_input_t *input, app_graphics_t *graphics)
 {
     glUseProgram (cube_scene->program_id);
+    glBindVertexArray (cube_scene->vao_cube);
+    glEnable (GL_DEPTH_TEST);
     cube_scene->angle += (2*M_PI*cube_scene->rev_per_s*input->time_elapsed_ms)/1000;
 
     mat4f model = rotation_y (cube_scene->angle);
@@ -476,6 +477,7 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
 
     static struct cube_scene_t cube_scene;
     static bool run_once = false;
+    static GLuint tex_quad_program, quad_vao, frame_buffer, tex_color_buffer;
     if (!run_once) {
         run_once = true;
         cube_scene = init_cube_scene(0.5);
@@ -483,10 +485,85 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
             st->end_execution = true;
             return blit_needed;
         }
+
+
+        glGenFramebuffers (1, &frame_buffer);
+        glBindFramebuffer (GL_FRAMEBUFFER, frame_buffer);
+
+        glGenTextures (1, &tex_color_buffer);
+        glBindTexture (GL_TEXTURE_2D, tex_color_buffer);
+
+        glTexImage2D (
+            GL_TEXTURE_2D, 0, GL_RGBA,
+            graphics->width, graphics->height, 0,
+            GL_RGBA, GL_UNSIGNED_BYTE, NULL
+        );
+        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glFramebufferTexture2D (
+            GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+            GL_TEXTURE_2D, tex_color_buffer, 0
+        );
+
+        GLuint depth_stencil;
+        glGenRenderbuffers (1, &depth_stencil);
+        glBindRenderbuffer (GL_RENDERBUFFER, depth_stencil);
+        glRenderbufferStorage (
+            GL_RENDERBUFFER, GL_DEPTH24_STENCIL8,
+            graphics->width, graphics->height
+        );
+        glFramebufferRenderbuffer (
+            GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+            GL_RENDERBUFFER, depth_stencil
+        );
+
+        float quad_v[] = {
+           //X     Y    U    V
+            -1.0,  1.0, 0.0, 1.0,
+             1.0, -1.0, 1.0, 0.0,
+             1.0,  1.0, 1.0, 1.0,
+
+            -1.0,  1.0, 0.0, 1.0,
+            -1.0, -1.0, 0.0, 0.0,
+             1.0, -1.0, 1.0, 0.0
+        };
+
+        glGenVertexArrays (1, &quad_vao);
+        glBindVertexArray (quad_vao);
+
+        GLuint quad;
+        glGenBuffers (1, &quad);
+        glBindBuffer (GL_ARRAY_BUFFER, quad);
+        glBufferData (GL_ARRAY_BUFFER, sizeof(quad_v), quad_v, GL_STATIC_DRAW);
+
+        tex_quad_program = gl_program ("2Dvertex_shader.glsl", "2Dfragment_shader.glsl");
+        if (!tex_quad_program) {
+            st->end_execution = true;
+        }
+
+        GLuint pos_loc = glGetAttribLocation (tex_quad_program, "position");
+        glEnableVertexAttribArray (pos_loc);
+        glVertexAttribPointer (pos_loc, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), 0);
+
+        GLuint tex_coord_loc = glGetAttribLocation (tex_quad_program, "tex_coord_in");
+        glEnableVertexAttribArray (tex_coord_loc);
+        glVertexAttribPointer (tex_coord_loc, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)(2*sizeof(float)));
+
+        GLuint tex_loc = glGetUniformLocation (tex_quad_program, "tex");
+        glUniform1i (tex_loc, 0);
     }
 
+    glBindFramebuffer (GL_FRAMEBUFFER, frame_buffer);
     render_cube_scene (&cube_scene, &input, graphics);
 
+    glBindFramebuffer (GL_FRAMEBUFFER, 0);
+    glBindVertexArray (quad_vao);
+    glUseProgram (tex_quad_program);
+    glDisable (GL_DEPTH_TEST);
+    glActiveTexture (GL_TEXTURE0);
+    glBindTexture (GL_TEXTURE_2D, tex_color_buffer);
+
+    glDrawArrays (GL_TRIANGLES, 0, 6);
     return true;
 }
 
