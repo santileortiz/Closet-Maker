@@ -609,6 +609,10 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
         yaw -= 0.01 * change.x;
     }
 
+    if (input.wheel != 1) {
+        distance -= (input.wheel - 1)*distance*0.7;
+    }
+
     pitch = CLAMP (pitch, -M_PI/2 + 0.0001, M_PI/2 - 0.0001);
     yaw = WRAP (yaw, -M_PI, M_PI);
 
