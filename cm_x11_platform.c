@@ -585,7 +585,7 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     static struct textured_quad_t quad;
     if (!run_once) {
         run_once = true;
-        cube_scene = init_cube_scene(0.5);
+        cube_scene = init_cube_scene(0.25);
         if (cube_scene.program_id == 0) {
             st->end_execution = true;
             return blit_needed;
@@ -599,13 +599,30 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
         }
     }
 
+    static float pitch = M_PI/4;
+    static float yaw = M_PI/4;
+    static float distance = 4.5;
+
+    if (st->gui_st.dragging[0]) {
+        vect2_t change = st->gui_st.ptr_delta;
+        pitch += 0.01 * change.y;
+        yaw -= 0.01 * change.x;
+    }
+
+    pitch = CLAMP (pitch, -M_PI/2 + 0.0001, M_PI/2 - 0.0001);
+    yaw = WRAP (yaw, -M_PI, M_PI);
+
+    vect3_t camera_pos = VECT3 (cos(pitch)*sin(yaw)*distance,
+                                sin(pitch)*distance,
+                                cos(pitch)*cos(yaw)*distance);
+
     cube_scene.angle += (2*M_PI*cube_scene.rev_per_s*input.time_elapsed_ms)/1000;
 
     glBindFramebuffer (GL_FRAMEBUFFER, 0);
-    render_cube_scene (&cube_scene, graphics, VECT3(2.5,2.5,2.5), true);
+    render_cube_scene (&cube_scene, graphics, camera_pos, true);
 
     glBindFramebuffer (GL_FRAMEBUFFER, framebuffer.fb_id);
-    render_cube_scene (&cube_scene, graphics, VECT3(-2.5,2.5,-2.5), false);
+    render_cube_scene (&cube_scene, graphics, camera_pos, false);
 
     render_textured_quad (&quad, framebuffer.tex_color_buffer);
     return true;
@@ -1416,6 +1433,7 @@ int main (void)
                     {
                         graphics.width = ((xcb_configure_notify_event_t*)event)->width;
                         graphics.height = ((xcb_configure_notify_event_t*)event)->height;
+
                         glViewport (0,0, graphics.width, graphics.height);
                     } break;
                 case XCB_MOTION_NOTIFY:

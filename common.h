@@ -33,6 +33,8 @@ typedef enum {false, true} bool;
 #define CLAMP(a,lower,upper) ((a)>(upper)?(upper):((a)<(lower)?(lower):(a)))
 #endif
 
+#define WRAP(a,lower,upper) ((a)>(upper)?(lower):((a)<(lower)?(upper):(a)))
+
 #define LOW_CLAMP(a,lower) ((a)<(lower)?(lower):(a))
 
 #define I_CEIL_DIVIDE(a,b) ((a%b)?(a)/(b)+1:(a)/(b))
