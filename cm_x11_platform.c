@@ -284,7 +284,7 @@ struct cube_scene_t {
     GLuint view_loc;
     GLuint proj_loc;
     GLuint override_loc;
-    GLuint vao_cube;
+    GLuint vao;
 
     float rev_per_s;
     float angle;
@@ -347,8 +347,8 @@ struct cube_scene_t init_cube_scene (float rev_per_s)
         -1.0f, -0.5f, -1.0f, 0.0f
     };
 
-    glGenVertexArrays (1, &scene.vao_cube);
-    glBindVertexArray (scene.vao_cube);
+    glGenVertexArrays (1, &scene.vao);
+    glBindVertexArray (scene.vao);
 
     GLuint vbo;
     glGenBuffers (1, &vbo);
@@ -381,40 +381,46 @@ struct cube_scene_t init_cube_scene (float rev_per_s)
     return scene;
 }
 
-void render_cube_scene (struct cube_scene_t *cube_scene, app_input_t *input, app_graphics_t *graphics)
+void render_cube_scene (struct cube_scene_t *cube_scene,
+                        app_graphics_t *graphics,
+                        vect3_t camera_pos, bool perspective)
 {
     glUseProgram (cube_scene->program_id);
-    glBindVertexArray (cube_scene->vao_cube);
+    glBindVertexArray (cube_scene->vao);
     glEnable (GL_DEPTH_TEST);
-    cube_scene->angle += (2*M_PI*cube_scene->rev_per_s*input->time_elapsed_ms)/1000;
 
     mat4f model = rotation_y (cube_scene->angle);
     glUniformMatrix4fv (cube_scene->model_loc, 1, GL_TRUE, model.E);
 
-#if 0
-    mat4f view = look_at (VECT3(0.3,0.3,0.3),
-                          VECT3(0,0,0),
-                          VECT3(0,1,0));
-    glUniformMatrix4fv (cube_scene->view_loc, 1, GL_TRUE, view.E);
 
-    mat4f projection = {{
-      0.4,  0,  0, 0,
-        0,0.4,  0, 0,
-        0,  0,0.1, 0,
-        0,  0,  0, 1
-    }};
-#else
-    mat4f view = look_at (VECT3(2.5,2.5,2.5),
-                          VECT3(0,0,0),
-                          VECT3(0,1,0));
-    glUniformMatrix4fv (cube_scene->view_loc, 1, GL_TRUE, view.E);
-    //mat4f view = camera_matrix (VECT3(1,0,0), VECT3(0,1,0), VECT3(0,0,1), VECT3(0,0,0.3));
+    if (!perspective) {
+        // Orthographic projection
+        vect3_mult_to (&camera_pos, 0.1);
+        mat4f view = look_at (camera_pos,
+                              VECT3(0,0,0),
+                              VECT3(0,1,0));
+        glUniformMatrix4fv (cube_scene->view_loc, 1, GL_TRUE, view.E);
 
-    float width_m = graphics->width / (1000 * (float)graphics->x_dpi);
-    float height_m = graphics->height / (1000 *(float)graphics->y_dpi);
-    mat4f projection = perspective_projection (-width_m/2, width_m/2, -height_m/2, height_m/2, 0.1, 10);
-#endif
-    glUniformMatrix4fv (cube_scene->proj_loc, 1, GL_TRUE, projection.E);
+        mat4f projection = {{
+          0.4,  0,  0, 0,
+            0,0.4,  0, 0,
+            0,  0,0.1, 0,
+            0,  0,  0, 1
+        }};
+        glUniformMatrix4fv (cube_scene->proj_loc, 1, GL_TRUE, projection.E);
+    } else {
+        // Perspective projection
+        mat4f view = look_at (camera_pos,
+                              VECT3(0,0,0),
+                              VECT3(0,1,0));
+        glUniformMatrix4fv (cube_scene->view_loc, 1, GL_TRUE, view.E);
+        //mat4f view = camera_matrix (VECT3(1,0,0), VECT3(0,1,0), VECT3(0,0,1), VECT3(0,0,0.3));
+
+        float width_m = graphics->width / (1000 * (float)graphics->x_dpi);
+        float height_m = graphics->height / (1000 *(float)graphics->y_dpi);
+        mat4f projection = perspective_projection (-width_m/2, width_m/2, -height_m/2, height_m/2, 0.1, 10);
+        glUniformMatrix4fv (cube_scene->proj_loc, 1, GL_TRUE, projection.E);
+    }
 
     glClearColor(0.3f, 0.3f, 0.9f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -450,6 +456,104 @@ void render_cube_scene (struct cube_scene_t *cube_scene, app_input_t *input, app
     glDisable(GL_STENCIL_TEST);
 }
 
+struct gl_framebuffer_t {
+    GLuint fb_id;
+    GLuint tex_color_buffer;
+};
+
+struct gl_framebuffer_t create_framebuffer (float width, float height)
+{
+    struct gl_framebuffer_t framebuffer;
+    glGenFramebuffers (1, &framebuffer.fb_id);
+    glBindFramebuffer (GL_FRAMEBUFFER, framebuffer.fb_id);
+
+    glGenTextures (1, &framebuffer.tex_color_buffer);
+    glBindTexture (GL_TEXTURE_2D, framebuffer.tex_color_buffer);
+
+    glTexImage2D (
+        GL_TEXTURE_2D, 0, GL_RGBA,
+        width, height, 0,
+        GL_RGBA, GL_UNSIGNED_BYTE, NULL
+    );
+    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glFramebufferTexture2D (
+        GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+        GL_TEXTURE_2D, framebuffer.tex_color_buffer, 0
+    );
+
+    GLuint depth_stencil;
+    glGenRenderbuffers (1, &depth_stencil);
+    glBindRenderbuffer (GL_RENDERBUFFER, depth_stencil);
+    glRenderbufferStorage (
+        GL_RENDERBUFFER, GL_DEPTH24_STENCIL8,
+        width, height
+    );
+    glFramebufferRenderbuffer (
+        GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+        GL_RENDERBUFFER, depth_stencil
+    );
+
+    return framebuffer;
+}
+
+struct textured_quad_t {
+    GLuint vao;
+    GLuint program_id;
+};
+
+struct textured_quad_t init_textured_quad (float x, float y, float width, float height)
+{
+    struct textured_quad_t res = {0};
+    float quad_v[] = {
+       //X       Y         U    V
+        x,       y+height, 0.0, 1.0,
+        x+width, y,        1.0, 0.0,
+        x+width, y+height, 1.0, 1.0,
+
+        x,       y+height, 0.0, 1.0,
+        x,       y,        0.0, 0.0,
+        x+width, y,        1.0, 0.0
+    };
+
+    glGenVertexArrays (1, &res.vao);
+    glBindVertexArray (res.vao);
+
+    GLuint quad;
+    glGenBuffers (1, &quad);
+    glBindBuffer (GL_ARRAY_BUFFER, quad);
+    glBufferData (GL_ARRAY_BUFFER, sizeof(quad_v), quad_v, GL_STATIC_DRAW);
+
+    res.program_id = gl_program ("2Dvertex_shader.glsl", "2Dfragment_shader.glsl");
+    if (!res.program_id) {
+        return res;
+    }
+
+    GLuint pos_loc = glGetAttribLocation (res.program_id, "position");
+    glEnableVertexAttribArray (pos_loc);
+    glVertexAttribPointer (pos_loc, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), 0);
+
+    GLuint tex_coord_loc = glGetAttribLocation (res.program_id, "tex_coord_in");
+    glEnableVertexAttribArray (tex_coord_loc);
+    glVertexAttribPointer (tex_coord_loc, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)(2*sizeof(float)));
+
+    GLuint tex_loc = glGetUniformLocation (res.program_id, "tex");
+    glUniform1i (tex_loc, 0);
+    return res;
+}
+
+void render_textured_quad (struct textured_quad_t *quad, GLuint texture)
+{
+    glBindFramebuffer (GL_FRAMEBUFFER, 0);
+    glBindVertexArray (quad->vao);
+    glUseProgram (quad->program_id);
+    glDisable (GL_DEPTH_TEST);
+    glActiveTexture (GL_TEXTURE0);
+    glBindTexture (GL_TEXTURE_2D, texture);
+
+    glDrawArrays (GL_TRIANGLES, 0, 6);
+}
+
 bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_input_t input)
 {
     bool blit_needed = false;
@@ -477,7 +581,8 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
 
     static struct cube_scene_t cube_scene;
     static bool run_once = false;
-    static GLuint tex_quad_program, quad_vao, frame_buffer, tex_color_buffer;
+    static struct gl_framebuffer_t framebuffer;
+    static struct textured_quad_t quad;
     if (!run_once) {
         run_once = true;
         cube_scene = init_cube_scene(0.5);
@@ -486,84 +591,23 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
             return blit_needed;
         }
 
-
-        glGenFramebuffers (1, &frame_buffer);
-        glBindFramebuffer (GL_FRAMEBUFFER, frame_buffer);
-
-        glGenTextures (1, &tex_color_buffer);
-        glBindTexture (GL_TEXTURE_2D, tex_color_buffer);
-
-        glTexImage2D (
-            GL_TEXTURE_2D, 0, GL_RGBA,
-            graphics->width, graphics->height, 0,
-            GL_RGBA, GL_UNSIGNED_BYTE, NULL
-        );
-        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glFramebufferTexture2D (
-            GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-            GL_TEXTURE_2D, tex_color_buffer, 0
-        );
-
-        GLuint depth_stencil;
-        glGenRenderbuffers (1, &depth_stencil);
-        glBindRenderbuffer (GL_RENDERBUFFER, depth_stencil);
-        glRenderbufferStorage (
-            GL_RENDERBUFFER, GL_DEPTH24_STENCIL8,
-            graphics->width, graphics->height
-        );
-        glFramebufferRenderbuffer (
-            GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-            GL_RENDERBUFFER, depth_stencil
-        );
-
-        float quad_v[] = {
-           //X     Y    U    V
-            -1.0,  1.0, 0.0, 1.0,
-             1.0, -1.0, 1.0, 0.0,
-             1.0,  1.0, 1.0, 1.0,
-
-            -1.0,  1.0, 0.0, 1.0,
-            -1.0, -1.0, 0.0, 0.0,
-             1.0, -1.0, 1.0, 0.0
-        };
-
-        glGenVertexArrays (1, &quad_vao);
-        glBindVertexArray (quad_vao);
-
-        GLuint quad;
-        glGenBuffers (1, &quad);
-        glBindBuffer (GL_ARRAY_BUFFER, quad);
-        glBufferData (GL_ARRAY_BUFFER, sizeof(quad_v), quad_v, GL_STATIC_DRAW);
-
-        tex_quad_program = gl_program ("2Dvertex_shader.glsl", "2Dfragment_shader.glsl");
-        if (!tex_quad_program) {
+        framebuffer = create_framebuffer (graphics->width, graphics->height);
+        quad = init_textured_quad (0.5, 0.5, 0.5, 0.5);
+        if (quad.program_id == 0) {
             st->end_execution = true;
+            return blit_needed;
         }
-
-        GLuint pos_loc = glGetAttribLocation (tex_quad_program, "position");
-        glEnableVertexAttribArray (pos_loc);
-        glVertexAttribPointer (pos_loc, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), 0);
-
-        GLuint tex_coord_loc = glGetAttribLocation (tex_quad_program, "tex_coord_in");
-        glEnableVertexAttribArray (tex_coord_loc);
-        glVertexAttribPointer (tex_coord_loc, 2, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)(2*sizeof(float)));
-
-        GLuint tex_loc = glGetUniformLocation (tex_quad_program, "tex");
-        glUniform1i (tex_loc, 0);
     }
 
-    glBindFramebuffer (GL_FRAMEBUFFER, frame_buffer);
-    render_cube_scene (&cube_scene, &input, graphics);
+    cube_scene.angle += (2*M_PI*cube_scene.rev_per_s*input.time_elapsed_ms)/1000;
 
     glBindFramebuffer (GL_FRAMEBUFFER, 0);
-    glBindVertexArray (quad_vao);
-    glUseProgram (tex_quad_program);
-    glDisable (GL_DEPTH_TEST);
-    glActiveTexture (GL_TEXTURE0);
-    glBindTexture (GL_TEXTURE_2D, tex_color_buffer);
+    render_cube_scene (&cube_scene, graphics, VECT3(2.5,2.5,2.5), true);
 
-    glDrawArrays (GL_TRIANGLES, 0, 6);
+    glBindFramebuffer (GL_FRAMEBUFFER, framebuffer.fb_id);
+    render_cube_scene (&cube_scene, graphics, VECT3(-2.5,2.5,-2.5), false);
+
+    render_textured_quad (&quad, framebuffer.tex_color_buffer);
     return true;
 }
 
@@ -1473,13 +1517,6 @@ int main (void)
         app_input.time_elapsed_ms = target_frame_length_ms;
 
         bool blit_needed = update_and_render (st, &graphics, app_input);
-
-        // TODO: Replace with some GL error check
-        //cairo_status_t cr_stat = cairo_status (graphics.cr);
-        //if (cr_stat != CAIRO_STATUS_SUCCESS) {
-        //    printf ("Cairo error: %s\n", cairo_status_to_string (cr_stat));
-        //    return 0;
-        //}
 
         if (blit_needed || force_blit) {
             glXSwapBuffers(x_st->xlib_dpy, glX_window);

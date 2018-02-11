@@ -655,6 +655,16 @@ vect3_t vect3_mult (vect3_t v, float k)
 }
 
 static inline
+vect3_t vect3_mult_to (vect3_t *v, float k)
+{
+    vect3_t res;
+    v->x = v->x*k;
+    v->y = v->y*k;
+    v->z = v->z*k;
+    return res;
+}
+
+static inline
 double vect3_norm (vect3_t v)
 {
     return sqrt ((v.x)*(v.x) + (v.y)*(v.y) + (v.z)*(v.z));
