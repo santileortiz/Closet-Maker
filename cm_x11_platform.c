@@ -285,12 +285,9 @@ struct cube_scene_t {
     GLuint proj_loc;
     GLuint override_loc;
     GLuint vao;
-
-    float rev_per_s;
-    float angle;
 };
 
-struct cube_scene_t init_cube_scene (float rev_per_s)
+struct cube_scene_t init_cube_scene ()
 {
     struct cube_scene_t scene;
 
@@ -373,26 +370,42 @@ struct cube_scene_t init_cube_scene (float rev_per_s)
     scene.proj_loc = glGetUniformLocation (scene.program_id, "proj");
     scene.override_loc = glGetUniformLocation (scene.program_id, "color_override");
 
-    scene.angle = 0;
-    scene.rev_per_s = rev_per_s;
-
     glUniform1f (scene.override_loc, 1.0f);
 
     return scene;
 }
 
+struct camera_t {
+    float width_m;
+    float height_m;
+    float near_plane;
+    float far_plane;
+    float pitch;
+    float yaw;
+    float distance;
+};
+
+vect3_t camera_compute_pos (struct camera_t *camera)
+{
+    camera->pitch = CLAMP (camera->pitch, -M_PI/2 + 0.0001, M_PI/2 - 0.0001);
+    camera->yaw = WRAP (camera->yaw, -M_PI, M_PI);
+
+    return VECT3 (cos(camera->pitch)*sin(camera->yaw)*camera->distance,
+                  sin(camera->pitch)*camera->distance,
+                  cos(camera->pitch)*cos(camera->yaw)*camera->distance);
+}
+
 void render_cube_scene (struct cube_scene_t *cube_scene,
-                        app_graphics_t *graphics,
-                        vect3_t camera_pos, bool perspective)
+                        struct camera_t *camera, bool perspective)
 {
     glUseProgram (cube_scene->program_id);
     glBindVertexArray (cube_scene->vao);
     glEnable (GL_DEPTH_TEST);
 
-    mat4f model = rotation_y (cube_scene->angle);
+    mat4f model = rotation_y (0);
     glUniformMatrix4fv (cube_scene->model_loc, 1, GL_TRUE, model.E);
 
-
+    vect3_t camera_pos = camera_compute_pos (camera);
     if (!perspective) {
         // Orthographic projection
         vect3_mult_to (&camera_pos, 0.1);
@@ -414,11 +427,10 @@ void render_cube_scene (struct cube_scene_t *cube_scene,
                               VECT3(0,0,0),
                               VECT3(0,1,0));
         glUniformMatrix4fv (cube_scene->view_loc, 1, GL_TRUE, view.E);
-        //mat4f view = camera_matrix (VECT3(1,0,0), VECT3(0,1,0), VECT3(0,0,1), VECT3(0,0,0.3));
 
-        float width_m = graphics->width / (1000 * (float)graphics->x_dpi);
-        float height_m = graphics->height / (1000 *(float)graphics->y_dpi);
-        mat4f projection = perspective_projection (-width_m/2, width_m/2, -height_m/2, height_m/2, 0.1, 10);
+        mat4f projection = perspective_projection (-camera->width_m/2, camera->width_m/2,
+                                                   -camera->height_m/2, camera->height_m/2,
+                                                   camera->near_plane, camera->far_plane);
         glUniformMatrix4fv (cube_scene->proj_loc, 1, GL_TRUE, projection.E);
     }
 
@@ -500,20 +512,21 @@ struct gl_framebuffer_t create_framebuffer (float width, float height)
 struct textured_quad_t {
     GLuint vao;
     GLuint program_id;
+    GLuint transf_loc;
 };
 
-struct textured_quad_t init_textured_quad (float x, float y, float width, float height)
+struct textured_quad_t init_textured_quad_renderer ()
 {
     struct textured_quad_t res = {0};
     float quad_v[] = {
-       //X       Y         U    V
-        x,       y+height, 0.0, 1.0,
-        x+width, y,        1.0, 0.0,
-        x+width, y+height, 1.0, 1.0,
+       //X  Y  U    V
+        -1, 1, 0.0, 1.0,
+         1,-1, 1.0, 0.0,
+         1, 1, 1.0, 1.0,
 
-        x,       y+height, 0.0, 1.0,
-        x,       y,        0.0, 0.0,
-        x+width, y,        1.0, 0.0
+        -1, 1, 0.0, 1.0,
+        -1,-1, 0.0, 0.0,
+         1,-1, 1.0, 0.0
     };
 
     glGenVertexArrays (1, &res.vao);
@@ -539,10 +552,54 @@ struct textured_quad_t init_textured_quad (float x, float y, float width, float 
 
     GLuint tex_loc = glGetUniformLocation (res.program_id, "tex");
     glUniform1i (tex_loc, 0);
+
+    res.transf_loc = glGetUniformLocation (res.program_id, "transf");
     return res;
 }
 
-void render_textured_quad (struct textured_quad_t *quad, GLuint texture)
+// The resulting transform sends s1 and s2 to d1 and d2 respectiveley.
+//   s1 = res * d1
+//   s2 = res * d2
+static inline
+mat4f transform_form_2_points (vect3_t s1, vect3_t s2, vect3_t d1, vect3_t d2)
+{
+    float xs, x0, ys, y0, zs, z0;
+    if (s1.x != s2.x) {
+        xs = (d1.x - d2.x)/(s1.x - s2.x);
+        x0 = (d2.x*s1.x - d2.x*s2.x - d1.x*s2.x + d2.x*s2.x)/(s1.x - s2.x);
+    } else {
+        xs = 1;
+        x0 = 0;
+    }
+
+    if (s1.y != s2.y) {
+        ys = (d1.y - d2.y)/(s1.y - s2.y);
+        y0 = (d2.y*s1.y - d2.y*s2.y - d1.y*s2.y + d2.y*s2.y)/(s1.y - s2.y);
+    } else {
+        ys = 1;
+        y0 = 0;
+    }
+
+    if (s1.z != s2.z) {
+        zs = (d1.z - d2.z)/(s1.z - s2.z);
+        z0 = (d2.z*s1.z - d2.z*s2.z - d1.z*s2.z + d2.z*s2.z)/(s1.z - s2.z);
+    } else {
+        zs = 1;
+        z0 = 0;
+    }
+
+    mat4f res = {{
+        xs, 0, 0,x0,
+         0,ys, 0,y0,
+         0, 0,zs,z0,
+         0, 0, 0, 1
+    }};
+    return res;
+}
+
+void render_textured_quad (struct textured_quad_t *quad, GLuint texture,
+                           app_graphics_t *graphics,
+                           float x, float y, float width_px, float height_px)
 {
     glBindFramebuffer (GL_FRAMEBUFFER, 0);
     glBindVertexArray (quad->vao);
@@ -550,6 +607,15 @@ void render_textured_quad (struct textured_quad_t *quad, GLuint texture)
     glDisable (GL_DEPTH_TEST);
     glActiveTexture (GL_TEXTURE0);
     glBindTexture (GL_TEXTURE_2D, texture);
+
+    vect3_t top_left_ndc = VECT3(-1+x/graphics->width, 1-y/graphics->height, 0);
+    vect3_t bottom_right_ndc = VECT3(top_left_ndc.x + 2*width_px/graphics->width,
+                                     top_left_ndc.y - 2*height_px/graphics->height,
+                                     0);
+
+    mat4f tr = transform_form_2_points (VECT3(-1,1,0), VECT3(1,-1,0),
+                                        top_left_ndc, bottom_right_ndc);
+    glUniformMatrix4fv (quad->transf_loc, 1, GL_TRUE, tr.E);
 
     glDrawArrays (GL_TRIANGLES, 0, 6);
 }
@@ -583,52 +649,59 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     static bool run_once = false;
     static struct gl_framebuffer_t framebuffer;
     static struct textured_quad_t quad;
+    static struct camera_t main_camera;
+    static float mini_vew_size_px;
     if (!run_once) {
         run_once = true;
-        cube_scene = init_cube_scene(0.25);
+        cube_scene = init_cube_scene();
         if (cube_scene.program_id == 0) {
             st->end_execution = true;
             return blit_needed;
         }
 
-        framebuffer = create_framebuffer (graphics->width, graphics->height);
-        quad = init_textured_quad (0.5, 0.5, 0.5, 0.5);
+        framebuffer = create_framebuffer (graphics->width, graphics->width);
+        quad = init_textured_quad_renderer ();
         if (quad.program_id == 0) {
             st->end_execution = true;
             return blit_needed;
         }
-    }
 
-    static float pitch = M_PI/4;
-    static float yaw = M_PI/4;
-    static float distance = 4.5;
+        main_camera.near_plane = 0.1;
+        main_camera.far_plane = 100;
+        main_camera.pitch = M_PI/4;
+        main_camera.yaw = M_PI/4;
+        main_camera.distance = 4.5;
+
+        mini_vew_size_px = graphics->width/3;
+    }
 
     if (st->gui_st.dragging[0]) {
         vect2_t change = st->gui_st.ptr_delta;
-        pitch += 0.01 * change.y;
-        yaw -= 0.01 * change.x;
+        main_camera.pitch += 0.01 * change.y;
+        main_camera.yaw -= 0.01 * change.x;
     }
 
     if (input.wheel != 1) {
-        distance -= (input.wheel - 1)*distance*0.7;
+        main_camera.distance -= (input.wheel - 1)*main_camera.distance*0.7;
     }
 
-    pitch = CLAMP (pitch, -M_PI/2 + 0.0001, M_PI/2 - 0.0001);
-    yaw = WRAP (yaw, -M_PI, M_PI);
-
-    vect3_t camera_pos = VECT3 (cos(pitch)*sin(yaw)*distance,
-                                sin(pitch)*distance,
-                                cos(pitch)*cos(yaw)*distance);
-
-    cube_scene.angle += (2*M_PI*cube_scene.rev_per_s*input.time_elapsed_ms)/1000;
+    main_camera.width_m = graphics->width / (1000 * (float)graphics->x_dpi);
+    main_camera.height_m = graphics->height / (1000 *(float)graphics->y_dpi);
 
     glBindFramebuffer (GL_FRAMEBUFFER, 0);
-    render_cube_scene (&cube_scene, graphics, camera_pos, true);
+    render_cube_scene (&cube_scene, &main_camera, true);
 
+    // NOTE: Make this camera square as the framebuffer.
+    struct camera_t secondary_camera = main_camera;
+    secondary_camera.height_m =
+        mini_vew_size_px / (1000 * (float)graphics->x_dpi);
+    secondary_camera.width_m =
+        mini_vew_size_px / (1000 * (float)graphics->y_dpi);
     glBindFramebuffer (GL_FRAMEBUFFER, framebuffer.fb_id);
-    render_cube_scene (&cube_scene, graphics, camera_pos, false);
+    render_cube_scene (&cube_scene, &secondary_camera, true);
 
-    render_textured_quad (&quad, framebuffer.tex_color_buffer);
+    render_textured_quad (&quad, framebuffer.tex_color_buffer, graphics,
+                          0, 0, mini_vew_size_px, mini_vew_size_px);
     return true;
 }
 

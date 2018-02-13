@@ -684,6 +684,11 @@ vect3_t vect3_normalize (vect3_t v)
     return res;
 }
 
+void vect3_print (vect3_t v)
+{
+    printf ("(%f, %f, %f) [%f]\n", v.x, v.y, v.z, vect3_norm(v));
+}
+
 typedef union {
     struct {
         double x;
