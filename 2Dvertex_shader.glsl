@@ -10,5 +10,5 @@ uniform mat4 transf;
 void main ()
 {
     tex_coord = tex_coord_in;
-    gl_Position = transf * vec4 (position, 0.0, 1.0);
+    gl_Position = vec4 (position, 0.0, 1.0);
 }

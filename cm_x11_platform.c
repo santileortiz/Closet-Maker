@@ -389,6 +389,7 @@ vect3_t camera_compute_pos (struct camera_t *camera)
 {
     camera->pitch = CLAMP (camera->pitch, -M_PI/2 + 0.0001, M_PI/2 - 0.0001);
     camera->yaw = WRAP (camera->yaw, -M_PI, M_PI);
+    camera->distance = LOW_CLAMP (camera->distance, camera->near_plane);
 
     return VECT3 (cos(camera->pitch)*sin(camera->yaw)*camera->distance,
                   sin(camera->pitch)*camera->distance,
@@ -471,11 +472,15 @@ void render_cube_scene (struct cube_scene_t *cube_scene,
 struct gl_framebuffer_t {
     GLuint fb_id;
     GLuint tex_color_buffer;
+    float width;
+    float height;
 };
 
 struct gl_framebuffer_t create_framebuffer (float width, float height)
 {
     struct gl_framebuffer_t framebuffer;
+    framebuffer.width = width;
+    framebuffer.height = height;
     glGenFramebuffers (1, &framebuffer.fb_id);
     glBindFramebuffer (GL_FRAMEBUFFER, framebuffer.fb_id);
 
@@ -509,11 +514,39 @@ struct gl_framebuffer_t create_framebuffer (float width, float height)
     return framebuffer;
 }
 
+static inline
+void draw_into_framebuffer (struct gl_framebuffer_t framebuffer)
+{
+    glBindFramebuffer (GL_FRAMEBUFFER, framebuffer.fb_id);
+    glViewport (0, 0, framebuffer.width, framebuffer.height);
+    glScissor (0, 0, framebuffer.width, framebuffer.height);
+}
+
+static inline
+void draw_into_window (app_graphics_t *graphics)
+{
+    glBindFramebuffer (GL_FRAMEBUFFER, 0);
+    glViewport (0, 0, graphics->width, graphics->height);
+    glScissor (0, 0, graphics->width, graphics->height);
+}
+
 struct textured_quad_t {
     GLuint vao;
     GLuint program_id;
     GLuint transf_loc;
 };
+
+static inline
+float px_to_m_x (app_graphics_t *graphics, float x_val_in_px)
+{
+    return x_val_in_px / (1000 * (float)graphics->x_dpi);
+}
+
+static inline
+float px_to_m_y (app_graphics_t *graphics, float y_val_in_px)
+{
+    return y_val_in_px / (1000 * (float)graphics->y_dpi);
+}
 
 struct textured_quad_t init_textured_quad_renderer ()
 {
@@ -608,15 +641,17 @@ void render_textured_quad (struct textured_quad_t *quad, GLuint texture,
     glActiveTexture (GL_TEXTURE0);
     glBindTexture (GL_TEXTURE_2D, texture);
 
-    vect3_t top_left_ndc = VECT3(-1+x/graphics->width, 1-y/graphics->height, 0);
-    vect3_t bottom_right_ndc = VECT3(top_left_ndc.x + 2*width_px/graphics->width,
-                                     top_left_ndc.y - 2*height_px/graphics->height,
-                                     0);
+    //vect3_t top_left_ndc = VECT3(-1+x/graphics->width, 1-y/graphics->height, 0);
+    //vect3_t bottom_right_ndc = VECT3(top_left_ndc.x + 2*width_px/graphics->width,
+    //                                 top_left_ndc.y - 2*height_px/graphics->height,
+    //                                 0);
 
-    mat4f tr = transform_form_2_points (VECT3(-1,1,0), VECT3(1,-1,0),
-                                        top_left_ndc, bottom_right_ndc);
-    glUniformMatrix4fv (quad->transf_loc, 1, GL_TRUE, tr.E);
+    //mat4f tr = transform_form_2_points (VECT3(-1,1,0), VECT3(1,-1,0),
+    //                                    top_left_ndc, bottom_right_ndc);
+    //glUniformMatrix4fv (quad->transf_loc, 1, GL_TRUE, tr.E);
 
+    glViewport (x, graphics->height - y - height_px, width_px, height_px);
+    glScissor (x, graphics->height - y - height_px, width_px, height_px);
     glDrawArrays (GL_TRIANGLES, 0, 6);
 }
 
@@ -672,7 +707,7 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
         main_camera.yaw = M_PI/4;
         main_camera.distance = 4.5;
 
-        mini_vew_size_px = graphics->width/3;
+        mini_vew_size_px = graphics->height;
     }
 
     if (st->gui_st.dragging[0]) {
@@ -685,23 +720,22 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
         main_camera.distance -= (input.wheel - 1)*main_camera.distance*0.7;
     }
 
-    main_camera.width_m = graphics->width / (1000 * (float)graphics->x_dpi);
-    main_camera.height_m = graphics->height / (1000 *(float)graphics->y_dpi);
+    main_camera.width_m = px_to_m_x (graphics, graphics->width);
+    main_camera.height_m = px_to_m_y (graphics, graphics->height);
 
-    glBindFramebuffer (GL_FRAMEBUFFER, 0);
+    draw_into_window (graphics);
     render_cube_scene (&cube_scene, &main_camera, true);
 
     // NOTE: Make this camera square as the framebuffer.
     struct camera_t secondary_camera = main_camera;
-    secondary_camera.height_m =
-        mini_vew_size_px / (1000 * (float)graphics->x_dpi);
-    secondary_camera.width_m =
-        mini_vew_size_px / (1000 * (float)graphics->y_dpi);
-    glBindFramebuffer (GL_FRAMEBUFFER, framebuffer.fb_id);
-    render_cube_scene (&cube_scene, &secondary_camera, true);
+    secondary_camera.height_m = px_to_m_x (graphics, mini_vew_size_px);
+    secondary_camera.width_m = px_to_m_y (graphics, mini_vew_size_px);
+
+    draw_into_framebuffer (framebuffer);
+    render_cube_scene (&cube_scene, &secondary_camera, false);
 
     render_textured_quad (&quad, framebuffer.tex_color_buffer, graphics,
-                          0, 0, mini_vew_size_px, mini_vew_size_px);
+                          0, 0, mini_vew_size_px/3, mini_vew_size_px/3);
     return true;
 }
 
@@ -1471,6 +1505,7 @@ int main (void)
     GLboolean has_compiler;
     glGetBooleanv (GL_SHADER_COMPILER, &has_compiler);
     assert (has_compiler == GL_TRUE);
+    glEnable(GL_SCISSOR_TEST);
 
     glEnable (GL_DEBUG_OUTPUT);
     glDebugMessageCallback((GLDEBUGPROC)MessageCallback, 0);
@@ -1510,8 +1545,6 @@ int main (void)
                     {
                         graphics.width = ((xcb_configure_notify_event_t*)event)->width;
                         graphics.height = ((xcb_configure_notify_event_t*)event)->height;
-
-                        glViewport (0,0, graphics.width, graphics.height);
                     } break;
                 case XCB_MOTION_NOTIFY:
                     {
