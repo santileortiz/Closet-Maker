@@ -682,8 +682,6 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
 
     static struct cube_scene_t cube_scene;
     static bool run_once = false;
-    static struct gl_framebuffer_t framebuffer;
-    static struct textured_quad_t quad;
     static struct camera_t main_camera;
     static float mini_vew_size_px;
     if (!run_once) {
@@ -694,20 +692,13 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
             return blit_needed;
         }
 
-        framebuffer = create_framebuffer (graphics->width, graphics->width);
-        quad = init_textured_quad_renderer ();
-        if (quad.program_id == 0) {
-            st->end_execution = true;
-            return blit_needed;
-        }
-
         main_camera.near_plane = 0.1;
         main_camera.far_plane = 100;
         main_camera.pitch = M_PI/4;
         main_camera.yaw = M_PI/4;
         main_camera.distance = 4.5;
 
-        mini_vew_size_px = graphics->height;
+        mini_vew_size_px = graphics->width/3;
     }
 
     if (st->gui_st.dragging[0]) {
@@ -726,16 +717,15 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     draw_into_window (graphics);
     render_cube_scene (&cube_scene, &main_camera, true);
 
+    glViewport (0,0,graphics->width/3, graphics->width/3);
+    glScissor (0,0,graphics->width/3, graphics->width/3);
+
     // NOTE: Make this camera square as the framebuffer.
     struct camera_t secondary_camera = main_camera;
     secondary_camera.height_m = px_to_m_x (graphics, mini_vew_size_px);
     secondary_camera.width_m = px_to_m_y (graphics, mini_vew_size_px);
-
-    draw_into_framebuffer (framebuffer);
     render_cube_scene (&cube_scene, &secondary_camera, false);
 
-    render_textured_quad (&quad, framebuffer.tex_color_buffer, graphics,
-                          0, 0, mini_vew_size_px/3, mini_vew_size_px/3);
     return true;
 }
 
