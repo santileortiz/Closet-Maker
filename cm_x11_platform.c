@@ -655,6 +655,105 @@ void render_textured_quad (struct textured_quad_t *quad, GLuint texture,
     glDrawArrays (GL_TRIANGLES, 0, 6);
 }
 
+struct closet_canvas_t {
+    GLuint program_id;
+    GLuint model_loc;
+    GLuint view_loc;
+    GLuint proj_loc;
+    GLuint override_loc;
+    GLuint vao;
+};
+
+struct closet_canvas_t set_vertex_buffer (float x_size, float y_size, float z_size)
+{
+    struct closet_canvas_t scene;
+
+    float unit_cube[] = {
+                        // Cube
+        -1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+         1.0f,  1.0f, -1.0f,
+         1.0f,  1.0f, -1.0f,
+        -1.0f,  1.0f, -1.0f,
+        -1.0f, -1.0f, -1.0f,
+
+        -1.0f, -1.0f,  1.0f,
+         1.0f, -1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+        -1.0f,  1.0f,  1.0f,
+        -1.0f, -1.0f,  1.0f,
+
+        -1.0f,  1.0f,  1.0f,
+        -1.0f,  1.0f, -1.0f,
+        -1.0f, -1.0f, -1.0f,
+        -1.0f, -1.0f, -1.0f,
+        -1.0f, -1.0f,  1.0f,
+        -1.0f,  1.0f,  1.0f,
+
+         1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+
+        -1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f,  1.0f,
+         1.0f, -1.0f,  1.0f,
+        -1.0f, -1.0f,  1.0f,
+        -1.0f, -1.0f, -1.0f,
+
+        -1.0f,  1.0f, -1.0f,
+         1.0f,  1.0f, -1.0f,
+         1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
+        -1.0f,  1.0f,  1.0f,
+        -1.0f,  1.0f, -1.0f,
+    };
+
+    mem_pool_t pool = {0};
+    float *vertices = mem_pool_push_size (&pool, sizeof(unit_cube));
+
+    int i;
+    for (i=0; i<ARRAY_SIZE (unit_cube); i+=3) {
+        vertices[i] = x_size/2 * unit_cube[i];
+        vertices[i+1] = y_size/2 * unit_cube[i+1];
+        vertices[i+2] = z_size/2 * unit_cube[i+2];
+    }
+
+    glGenVertexArrays (1, &scene.vao);
+    glBindVertexArray (scene.vao);
+
+    GLuint vbo;
+    glGenBuffers (1, &vbo);
+    glBindBuffer (GL_ARRAY_BUFFER, vbo);
+    glBufferData (GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+    scene.program_id = gl_program ("vertex_shader.glsl", "fragment_shader.glsl");
+    if (!scene.program_id) {
+        return scene;
+    }
+    GLint pos_attr = glGetAttribLocation (scene.program_id, "position");
+    glEnableVertexAttribArray (pos_attr);
+    glVertexAttribPointer (pos_attr, 3, GL_FLOAT, GL_FALSE, 4*sizeof(float), 0);
+
+    GLint color_attr = glGetAttribLocation (scene.program_id, "color_in");
+    glEnableVertexAttribArray (color_attr);
+    glVertexAttribPointer (color_attr, 1, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)(3*sizeof(float)));
+
+
+    scene.model_loc = glGetUniformLocation (scene.program_id, "model");
+    scene.view_loc = glGetUniformLocation (scene.program_id, "view");
+    scene.proj_loc = glGetUniformLocation (scene.program_id, "proj");
+    scene.override_loc = glGetUniformLocation (scene.program_id, "color_override");
+
+    glUniform1f (scene.override_loc, 1.0f);
+
+    return scene;
+}
+
 bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_input_t input)
 {
     bool blit_needed = false;
@@ -684,6 +783,7 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     static bool run_once = false;
     static struct camera_t main_camera;
     static float mini_vew_size_px;
+
     if (!run_once) {
         run_once = true;
         cube_scene = init_cube_scene();
