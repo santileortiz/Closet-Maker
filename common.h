@@ -618,7 +618,7 @@ typedef union {
     };
     float E[3];
 } vec3f;
-#define VECT3(x,y,z) ((vec3f){{x,y,z}})
+#define VEC3F(x,y,z) ((vec3f){{x,y,z}})
 
 static inline
 double vec3f_dot (vec3f v1, vec3f v2)
@@ -676,7 +676,7 @@ static inline
 vec3f vec3f_normalize (vec3f v)
 {
     vec3f res;
-    double norm = vect3_norm (v);
+    double norm = vec3f_norm (v);
     assert (norm != 0);
     res.x = v.x/norm;
     res.y = v.y/norm;
@@ -686,7 +686,7 @@ vec3f vec3f_normalize (vec3f v)
 
 void vec3f_print (vec3f v)
 {
-    printf ("(%f, %f, %f) [%f]\n", v.x, v.y, v.z, vect3_norm(v));
+    printf ("(%f, %f, %f) [%f]\n", v.x, v.y, v.z, vec3f_norm(v));
 }
 
 typedef union {

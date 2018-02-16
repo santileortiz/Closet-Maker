@@ -660,16 +660,15 @@ struct closet_canvas_t {
     GLuint model_loc;
     GLuint view_loc;
     GLuint proj_loc;
-    GLuint override_loc;
     GLuint vao;
 };
 
-struct closet_canvas_t set_vertex_buffer (float x_size, float y_size, float z_size)
+struct closet_canvas_t init_closet_canvas (float x_size, float y_size, float z_size)
 {
     struct closet_canvas_t scene;
 
     float unit_cube[] = {
-                        // Cube
+        // Cube
         -1.0f, -1.0f, -1.0f,
          1.0f, -1.0f, -1.0f,
          1.0f,  1.0f, -1.0f,
@@ -723,6 +722,10 @@ struct closet_canvas_t set_vertex_buffer (float x_size, float y_size, float z_si
         vertices[i+2] = z_size/2 * unit_cube[i+2];
     }
 
+    for (i=0; i<ARRAY_SIZE (unit_cube); i+=3) {
+        printf ("(%f, %f, %f)\n", vertices[i], vertices[i+1], vertices[i+2]);
+    }
+
     glGenVertexArrays (1, &scene.vao);
     glBindVertexArray (scene.vao);
 
@@ -737,21 +740,38 @@ struct closet_canvas_t set_vertex_buffer (float x_size, float y_size, float z_si
     }
     GLint pos_attr = glGetAttribLocation (scene.program_id, "position");
     glEnableVertexAttribArray (pos_attr);
-    glVertexAttribPointer (pos_attr, 3, GL_FLOAT, GL_FALSE, 4*sizeof(float), 0);
-
-    GLint color_attr = glGetAttribLocation (scene.program_id, "color_in");
-    glEnableVertexAttribArray (color_attr);
-    glVertexAttribPointer (color_attr, 1, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)(3*sizeof(float)));
-
+    glVertexAttribPointer (pos_attr, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float), 0);
 
     scene.model_loc = glGetUniformLocation (scene.program_id, "model");
     scene.view_loc = glGetUniformLocation (scene.program_id, "view");
     scene.proj_loc = glGetUniformLocation (scene.program_id, "proj");
-    scene.override_loc = glGetUniformLocation (scene.program_id, "color_override");
-
-    glUniform1f (scene.override_loc, 1.0f);
 
     return scene;
+}
+
+void render_closet (struct closet_canvas_t *closet_canvas, struct camera_t *camera)
+{
+    glUseProgram (closet_canvas->program_id);
+    glBindVertexArray (closet_canvas->vao);
+    glEnable (GL_DEPTH_TEST);
+
+    mat4f model = rotation_y (0);
+    glUniformMatrix4fv (closet_canvas->model_loc, 1, GL_TRUE, model.E);
+
+    vect3_t camera_pos = camera_compute_pos (camera);
+    mat4f view = look_at (camera_pos,
+                          VECT3(0,0,0),
+                          VECT3(0,1,0));
+    glUniformMatrix4fv (closet_canvas->view_loc, 1, GL_TRUE, view.E);
+
+    mat4f projection = perspective_projection (-camera->width_m/2, camera->width_m/2,
+                                               -camera->height_m/2, camera->height_m/2,
+                                               camera->near_plane, camera->far_plane);
+    glUniformMatrix4fv (closet_canvas->proj_loc, 1, GL_TRUE, projection.E);
+
+    glClearColor(0.3f, 0.3f, 0.9f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glDrawArrays (GL_TRIANGLES, 0, 36);
 }
 
 bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_input_t input)
@@ -779,15 +799,14 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
             break;
     }
 
-    static struct cube_scene_t cube_scene;
+    static struct closet_canvas_t closet_canvas;
     static bool run_once = false;
     static struct camera_t main_camera;
-    static float mini_vew_size_px;
 
     if (!run_once) {
         run_once = true;
-        cube_scene = init_cube_scene();
-        if (cube_scene.program_id == 0) {
+        closet_canvas = init_closet_canvas (1, 1, 1);
+        if (closet_canvas.program_id == 0) {
             st->end_execution = true;
             return blit_needed;
         }
@@ -798,33 +817,22 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
         main_camera.yaw = M_PI/4;
         main_camera.distance = 4.5;
 
-        mini_vew_size_px = graphics->width/3;
+        main_camera.width_m = px_to_m_x (graphics, graphics->width);
+        main_camera.height_m = px_to_m_y (graphics, graphics->height);
+
+        draw_into_window (graphics);
+        render_closet (&closet_canvas, &main_camera);
     }
 
-    if (st->gui_st.dragging[0]) {
-        vect2_t change = st->gui_st.ptr_delta;
-        main_camera.pitch += 0.01 * change.y;
-        main_camera.yaw -= 0.01 * change.x;
-    }
+    //if (st->gui_st.dragging[0]) {
+    //    vect2_t change = st->gui_st.ptr_delta;
+    //    main_camera.pitch += 0.01 * change.y;
+    //    main_camera.yaw -= 0.01 * change.x;
+    //}
 
-    if (input.wheel != 1) {
-        main_camera.distance -= (input.wheel - 1)*main_camera.distance*0.7;
-    }
-
-    main_camera.width_m = px_to_m_x (graphics, graphics->width);
-    main_camera.height_m = px_to_m_y (graphics, graphics->height);
-
-    draw_into_window (graphics);
-    render_cube_scene (&cube_scene, &main_camera, true);
-
-    glViewport (0,0,graphics->width/3, graphics->width/3);
-    glScissor (0,0,graphics->width/3, graphics->width/3);
-
-    // NOTE: Make this camera square as the framebuffer.
-    struct camera_t secondary_camera = main_camera;
-    secondary_camera.height_m = px_to_m_x (graphics, mini_vew_size_px);
-    secondary_camera.width_m = px_to_m_y (graphics, mini_vew_size_px);
-    render_cube_scene (&cube_scene, &secondary_camera, false);
+    //if (input.wheel != 1) {
+    //    main_camera.distance -= (input.wheel - 1)*main_camera.distance*0.7;
+    //}
 
     return true;
 }
