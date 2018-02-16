@@ -606,6 +606,91 @@ void vect2_print (vect2_t *v)
 
 typedef union {
     struct {
+        float x;
+        float y;
+        float z;
+    };
+
+    struct {
+        float r;
+        float g;
+        float b;
+    };
+    float E[3];
+} vec3f;
+#define VECT3(x,y,z) ((vec3f){{x,y,z}})
+
+static inline
+double vec3f_dot (vec3f v1, vec3f v2)
+{
+    return v1.x*v2.x + v1.y*v2.y + v1.z*v2.z;
+}
+
+static inline
+vec3f vec3f_cross (vec3f v1, vec3f v2)
+{
+    vec3f res;
+    res.x = v1.y*v2.z - v1.z*v2.y;
+    res.y = v1.z*v2.x - v1.x*v2.z;
+    res.z = v1.x*v2.y - v1.y*v2.x;
+    return res;
+}
+
+static inline
+vec3f vec3f_subs (vec3f v1, vec3f v2)
+{
+    vec3f res;
+    res.x = v1.x-v2.x;
+    res.y = v1.y-v2.y;
+    res.z = v1.z-v2.z;
+    return res;
+}
+
+static inline
+vec3f vec3f_mult (vec3f v, float k)
+{
+    vec3f res;
+    res.x = v.x*k;
+    res.y = v.y*k;
+    res.z = v.z*k;
+    return res;
+}
+
+static inline
+vec3f vec3f_mult_to (vec3f *v, float k)
+{
+    vec3f res;
+    v->x = v->x*k;
+    v->y = v->y*k;
+    v->z = v->z*k;
+    return res;
+}
+
+static inline
+double vec3f_norm (vec3f v)
+{
+    return sqrt ((v.x)*(v.x) + (v.y)*(v.y) + (v.z)*(v.z));
+}
+
+static inline
+vec3f vec3f_normalize (vec3f v)
+{
+    vec3f res;
+    double norm = vect3_norm (v);
+    assert (norm != 0);
+    res.x = v.x/norm;
+    res.y = v.y/norm;
+    res.z = v.z/norm;
+    return res;
+}
+
+void vec3f_print (vec3f v)
+{
+    printf ("(%f, %f, %f) [%f]\n", v.x, v.y, v.z, vect3_norm(v));
+}
+
+typedef union {
+    struct {
         double x;
         double y;
         double z;
