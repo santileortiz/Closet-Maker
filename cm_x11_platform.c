@@ -669,11 +669,11 @@ struct closet_canvas_t init_closet_canvas (float x_size, float y_size, float z_s
 
     float unit_cube[] = {
         // Cube
-        -1.0f, -1.0f, -1.0f,
          1.0f, -1.0f, -1.0f,
-         1.0f,  1.0f, -1.0f,
+        -1.0f, -1.0f, -1.0f,
          1.0f,  1.0f, -1.0f,
         -1.0f,  1.0f, -1.0f,
+         1.0f,  1.0f, -1.0f,
         -1.0f, -1.0f, -1.0f,
 
         -1.0f, -1.0f,  1.0f,
@@ -690,11 +690,11 @@ struct closet_canvas_t init_closet_canvas (float x_size, float y_size, float z_s
         -1.0f, -1.0f,  1.0f,
         -1.0f,  1.0f,  1.0f,
 
-         1.0f,  1.0f,  1.0f,
          1.0f,  1.0f, -1.0f,
-         1.0f, -1.0f, -1.0f,
+         1.0f,  1.0f,  1.0f,
          1.0f, -1.0f, -1.0f,
          1.0f, -1.0f,  1.0f,
+         1.0f, -1.0f, -1.0f,
          1.0f,  1.0f,  1.0f,
 
         -1.0f, -1.0f, -1.0f,
@@ -705,10 +705,10 @@ struct closet_canvas_t init_closet_canvas (float x_size, float y_size, float z_s
         -1.0f, -1.0f, -1.0f,
 
         -1.0f,  1.0f, -1.0f,
+         1.0f,  1.0f,  1.0f,
          1.0f,  1.0f, -1.0f,
-         1.0f,  1.0f,  1.0f,
-         1.0f,  1.0f,  1.0f,
         -1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,
         -1.0f,  1.0f, -1.0f,
     };
 
@@ -722,17 +722,13 @@ struct closet_canvas_t init_closet_canvas (float x_size, float y_size, float z_s
         vertices[i+2] = z_size/2 * unit_cube[i+2];
     }
 
-    for (i=0; i<ARRAY_SIZE (unit_cube); i+=3) {
-        printf ("(%f, %f, %f)\n", vertices[i], vertices[i+1], vertices[i+2]);
-    }
-
     glGenVertexArrays (1, &scene.vao);
     glBindVertexArray (scene.vao);
 
     GLuint vbo;
     glGenBuffers (1, &vbo);
     glBindBuffer (GL_ARRAY_BUFFER, vbo);
-    glBufferData (GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+    glBufferData (GL_ARRAY_BUFFER, sizeof(unit_cube), vertices, GL_STATIC_DRAW);
 
     scene.program_id = gl_program ("vertex_shader.glsl", "fragment_shader.glsl");
     if (!scene.program_id) {
@@ -805,7 +801,7 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
 
     if (!run_once) {
         run_once = true;
-        closet_canvas = init_closet_canvas (1, 1, 1);
+        closet_canvas = init_closet_canvas (0.9, 0.4, 0.7);
         if (closet_canvas.program_id == 0) {
             st->end_execution = true;
             return blit_needed;
@@ -819,20 +815,20 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
 
         main_camera.width_m = px_to_m_x (graphics, graphics->width);
         main_camera.height_m = px_to_m_y (graphics, graphics->height);
-
-        draw_into_window (graphics);
-        render_closet (&closet_canvas, &main_camera);
     }
 
-    //if (st->gui_st.dragging[0]) {
-    //    vect2_t change = st->gui_st.ptr_delta;
-    //    main_camera.pitch += 0.01 * change.y;
-    //    main_camera.yaw -= 0.01 * change.x;
-    //}
+    if (st->gui_st.dragging[0]) {
+        vect2_t change = st->gui_st.ptr_delta;
+        main_camera.pitch += 0.01 * change.y;
+        main_camera.yaw -= 0.01 * change.x;
+    }
 
-    //if (input.wheel != 1) {
-    //    main_camera.distance -= (input.wheel - 1)*main_camera.distance*0.7;
-    //}
+    if (input.wheel != 1) {
+        main_camera.distance -= (input.wheel - 1)*main_camera.distance*0.7;
+    }
+
+    draw_into_window (graphics);
+    render_closet (&closet_canvas, &main_camera);
 
     return true;
 }
