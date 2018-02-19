@@ -1547,6 +1547,8 @@ int main (void)
                          GLX_BLUE_SIZE, 8,
                          GLX_ALPHA_SIZE, 8,
                          GLX_STENCIL_SIZE, 8,
+                         GLX_SAMPLE_BUFFERS, 1,
+                         GLX_SAMPLES, 4,
                          GL_NONE};
     GLXFBConfig* framebuffer_confs =
         glXChooseFBConfig (x_st->xlib_dpy, default_screen, attrib_list, &num_GLX_confs);
@@ -1607,6 +1609,8 @@ int main (void)
 
     glEnable (GL_DEBUG_OUTPUT);
     glDebugMessageCallback((GLDEBUGPROC)MessageCallback, 0);
+
+    glEnable (GL_MULTISAMPLE);
 
     // ////////////////
     // Main event loop
