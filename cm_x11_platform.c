@@ -669,47 +669,47 @@ struct closet_canvas_t init_closet_canvas (float x_size, float y_size, float z_s
 
     float unit_cube[] = {
         // Cube
-         1.0f, -1.0f, -1.0f,
-        -1.0f, -1.0f, -1.0f,
-         1.0f,  1.0f, -1.0f,
-        -1.0f,  1.0f, -1.0f,
-         1.0f,  1.0f, -1.0f,
-        -1.0f, -1.0f, -1.0f,
+         1.0f, -1.0f, -1.0f,  0.0f,  0.0f, -1.0f,
+        -1.0f, -1.0f, -1.0f,  0.0f,  0.0f, -1.0f,
+         1.0f,  1.0f, -1.0f,  0.0f,  0.0f, -1.0f,
+        -1.0f,  1.0f, -1.0f,  0.0f,  0.0f, -1.0f,
+         1.0f,  1.0f, -1.0f,  0.0f,  0.0f, -1.0f,
+        -1.0f, -1.0f, -1.0f,  0.0f,  0.0f, -1.0f,
 
-        -1.0f, -1.0f,  1.0f,
-         1.0f, -1.0f,  1.0f,
-         1.0f,  1.0f,  1.0f,
-         1.0f,  1.0f,  1.0f,
-        -1.0f,  1.0f,  1.0f,
-        -1.0f, -1.0f,  1.0f,
+        -1.0f, -1.0f,  1.0f,  0.0f,  0.0f,  1.0f,
+         1.0f, -1.0f,  1.0f,  0.0f,  0.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,  0.0f,  0.0f,  1.0f,
+         1.0f,  1.0f,  1.0f,  0.0f,  0.0f,  1.0f,
+        -1.0f,  1.0f,  1.0f,  0.0f,  0.0f,  1.0f,
+        -1.0f, -1.0f,  1.0f,  0.0f,  0.0f,  1.0f,
 
-        -1.0f,  1.0f,  1.0f,
-        -1.0f,  1.0f, -1.0f,
-        -1.0f, -1.0f, -1.0f,
-        -1.0f, -1.0f, -1.0f,
-        -1.0f, -1.0f,  1.0f,
-        -1.0f,  1.0f,  1.0f,
+        -1.0f,  1.0f,  1.0f, -1.0f,  0.0f,  0.0f,
+        -1.0f,  1.0f, -1.0f, -1.0f,  0.0f,  0.0f,
+        -1.0f, -1.0f, -1.0f, -1.0f,  0.0f,  0.0f,
+        -1.0f, -1.0f, -1.0f, -1.0f,  0.0f,  0.0f,
+        -1.0f, -1.0f,  1.0f, -1.0f,  0.0f,  0.0f,
+        -1.0f,  1.0f,  1.0f, -1.0f,  0.0f,  0.0f,
 
-         1.0f,  1.0f, -1.0f,
-         1.0f,  1.0f,  1.0f,
-         1.0f, -1.0f, -1.0f,
-         1.0f, -1.0f,  1.0f,
-         1.0f, -1.0f, -1.0f,
-         1.0f,  1.0f,  1.0f,
+         1.0f,  1.0f, -1.0f,  1.0f,  0.0f,  0.0f,
+         1.0f,  1.0f,  1.0f,  1.0f,  0.0f,  0.0f,
+         1.0f, -1.0f, -1.0f,  1.0f,  0.0f,  0.0f,
+         1.0f, -1.0f,  1.0f,  1.0f,  0.0f,  0.0f,
+         1.0f, -1.0f, -1.0f,  1.0f,  0.0f,  0.0f,
+         1.0f,  1.0f,  1.0f,  1.0f,  0.0f,  0.0f,
 
-        -1.0f, -1.0f, -1.0f,
-         1.0f, -1.0f, -1.0f,
-         1.0f, -1.0f,  1.0f,
-         1.0f, -1.0f,  1.0f,
-        -1.0f, -1.0f,  1.0f,
-        -1.0f, -1.0f, -1.0f,
+        -1.0f, -1.0f, -1.0f,  0.0f, -1.0f,  0.0f,
+         1.0f, -1.0f, -1.0f,  0.0f, -1.0f,  0.0f,
+         1.0f, -1.0f,  1.0f,  0.0f, -1.0f,  0.0f,
+         1.0f, -1.0f,  1.0f,  0.0f, -1.0f,  0.0f,
+        -1.0f, -1.0f,  1.0f,  0.0f, -1.0f,  0.0f,
+        -1.0f, -1.0f, -1.0f,  0.0f, -1.0f,  0.0f,
 
-        -1.0f,  1.0f, -1.0f,
-         1.0f,  1.0f,  1.0f,
-         1.0f,  1.0f, -1.0f,
-        -1.0f,  1.0f,  1.0f,
-         1.0f,  1.0f,  1.0f,
-        -1.0f,  1.0f, -1.0f,
+        -1.0f,  1.0f, -1.0f,  0.0f,  1.0f,  0.0f,
+         1.0f,  1.0f,  1.0f,  0.0f,  1.0f,  0.0f,
+         1.0f,  1.0f, -1.0f,  0.0f,  1.0f,  0.0f,
+        -1.0f,  1.0f,  1.0f,  0.0f,  1.0f,  0.0f,
+         1.0f,  1.0f,  1.0f,  0.0f,  1.0f,  0.0f,
+        -1.0f,  1.0f, -1.0f,  0.0f,  1.0f,  0.0f,
     };
 
     mem_pool_t pool = {0};
@@ -736,7 +736,11 @@ struct closet_canvas_t init_closet_canvas (float x_size, float y_size, float z_s
     }
     GLint pos_attr = glGetAttribLocation (scene.program_id, "position");
     glEnableVertexAttribArray (pos_attr);
-    glVertexAttribPointer (pos_attr, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float), 0);
+    glVertexAttribPointer (pos_attr, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), 0);
+
+    GLint normal_attr = glGetAttribLocation (scene.program_id, "in_normal");
+    glEnableVertexAttribArray (normal_attr);
+    glVertexAttribPointer (normal_attr, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), (void*)(3*sizeof(float)));
 
     scene.model_loc = glGetUniformLocation (scene.program_id, "model");
     scene.view_loc = glGetUniformLocation (scene.program_id, "view");
