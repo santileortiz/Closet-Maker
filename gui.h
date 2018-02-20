@@ -24,7 +24,6 @@ typedef struct {
 
 // TODO: Do per platform too.
 typedef struct {
-    uint64_t start_ticks;
     float time_elapsed_ms;
 
     bool force_redraw;

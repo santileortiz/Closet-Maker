@@ -35,12 +35,6 @@
 
 #include "app_api.h"
 
-uint64_t rdtsc(){
-    unsigned int lo,hi;
-    __asm__ __volatile__ ("rdtsc" : "=a" (lo), "=d" (hi));
-    return ((uint64_t)hi << 32) | lo;
-}
-
 void MessageCallback( GLenum source,
                       GLenum type,
                       GLuint id,
@@ -278,103 +272,6 @@ vect3_t mat4f_times_point (mat4f mat, vect3_t p)
     return res;
 }
 
-struct cube_scene_t {
-    GLuint program_id;
-    GLuint model_loc;
-    GLuint view_loc;
-    GLuint proj_loc;
-    GLuint override_loc;
-    GLuint vao;
-};
-
-struct cube_scene_t init_cube_scene ()
-{
-    struct cube_scene_t scene;
-
-    float vertices[] = {
-                        // Cube
-        -0.5f, -0.5f, -0.5f,  0.0,
-        0.5f, -0.5f, -0.5f,  0.66,
-        0.5f,  0.5f, -0.5f,  1.0,
-        0.5f,  0.5f, -0.5f,  1.0,
-        -0.5f,  0.5f, -0.5f,  0.33,
-        -0.5f, -0.5f, -0.5f,  0.0,
-
-        -0.5f, -0.5f,  0.5f,  0.0,
-        0.5f, -0.5f,  0.5f,  0.66,
-        0.5f,  0.5f,  0.5f,  1.0,
-        0.5f,  0.5f,  0.5f,  1.0,
-        -0.5f,  0.5f,  0.5f,  0.33,
-        -0.5f, -0.5f,  0.5f,  0.0,
-
-        -0.5f,  0.5f,  0.5f,  0.66,
-        -0.5f,  0.5f, -0.5f,  1.0,
-        -0.5f, -0.5f, -0.5f,  0.33,
-        -0.5f, -0.5f, -0.5f,  0.33,
-        -0.5f, -0.5f,  0.5f,  0.0,
-        -0.5f,  0.5f,  0.5f,  0.66,
-
-        0.5f,  0.5f,  0.5f,  0.66,
-        0.5f,  0.5f, -0.5f,  1.0,
-        0.5f, -0.5f, -0.5f,  0.33,
-        0.5f, -0.5f, -0.5f,  0.33,
-        0.5f, -0.5f,  0.5f,  0.0,
-        0.5f,  0.5f,  0.5f,  0.66,
-
-        -0.5f, -0.5f, -0.5f,  0.33,
-        0.5f, -0.5f, -0.5f,  1.0,
-        0.5f, -0.5f,  0.5f,  0.66,
-        0.5f, -0.5f,  0.5f,  0.66,
-        -0.5f, -0.5f,  0.5f,  0.0,
-        -0.5f, -0.5f, -0.5f,  0.33,
-
-        -0.5f,  0.5f, -0.5f,  0.33,
-        0.5f,  0.5f, -0.5f,  1.0,
-        0.5f,  0.5f,  0.5f,  0.66,
-        0.5f,  0.5f,  0.5f,  0.66,
-        -0.5f,  0.5f,  0.5f,  0.0,
-        -0.5f,  0.5f, -0.5f,  0.33,
-
-        // Floor
-        -1.0f, -0.5f, -1.0f, 0.0f,
-        1.0f, -0.5f, -1.0f, 0.0f,
-        1.0f, -0.5f,  1.0f, 0.0f,
-        1.0f, -0.5f,  1.0f, 0.0f,
-        -1.0f, -0.5f,  1.0f, 0.0f,
-        -1.0f, -0.5f, -1.0f, 0.0f
-    };
-
-    glGenVertexArrays (1, &scene.vao);
-    glBindVertexArray (scene.vao);
-
-    GLuint vbo;
-    glGenBuffers (1, &vbo);
-    glBindBuffer (GL_ARRAY_BUFFER, vbo);
-    glBufferData (GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-
-    scene.program_id = gl_program ("vertex_shader.glsl", "fragment_shader.glsl");
-    if (!scene.program_id) {
-        return scene;
-    }
-    GLint pos_attr = glGetAttribLocation (scene.program_id, "position");
-    glEnableVertexAttribArray (pos_attr);
-    glVertexAttribPointer (pos_attr, 3, GL_FLOAT, GL_FALSE, 4*sizeof(float), 0);
-
-    GLint color_attr = glGetAttribLocation (scene.program_id, "color_in");
-    glEnableVertexAttribArray (color_attr);
-    glVertexAttribPointer (color_attr, 1, GL_FLOAT, GL_FALSE, 4*sizeof(float), (void*)(3*sizeof(float)));
-
-
-    scene.model_loc = glGetUniformLocation (scene.program_id, "model");
-    scene.view_loc = glGetUniformLocation (scene.program_id, "view");
-    scene.proj_loc = glGetUniformLocation (scene.program_id, "proj");
-    scene.override_loc = glGetUniformLocation (scene.program_id, "color_override");
-
-    glUniform1f (scene.override_loc, 1.0f);
-
-    return scene;
-}
-
 struct camera_t {
     float width_m;
     float height_m;
@@ -394,79 +291,6 @@ vect3_t camera_compute_pos (struct camera_t *camera)
     return VECT3 (cos(camera->pitch)*sin(camera->yaw)*camera->distance,
                   sin(camera->pitch)*camera->distance,
                   cos(camera->pitch)*cos(camera->yaw)*camera->distance);
-}
-
-void render_cube_scene (struct cube_scene_t *cube_scene,
-                        struct camera_t *camera, bool perspective)
-{
-    glUseProgram (cube_scene->program_id);
-    glBindVertexArray (cube_scene->vao);
-    glEnable (GL_DEPTH_TEST);
-
-    mat4f model = rotation_y (0);
-    glUniformMatrix4fv (cube_scene->model_loc, 1, GL_TRUE, model.E);
-
-    vect3_t camera_pos = camera_compute_pos (camera);
-    if (!perspective) {
-        // Orthographic projection
-        vect3_mult_to (&camera_pos, 0.1);
-        mat4f view = look_at (camera_pos,
-                              VECT3(0,0,0),
-                              VECT3(0,1,0));
-        glUniformMatrix4fv (cube_scene->view_loc, 1, GL_TRUE, view.E);
-
-        mat4f projection = {{
-          0.4,  0,  0, 0,
-            0,0.4,  0, 0,
-            0,  0,0.1, 0,
-            0,  0,  0, 1
-        }};
-        glUniformMatrix4fv (cube_scene->proj_loc, 1, GL_TRUE, projection.E);
-    } else {
-        // Perspective projection
-        mat4f view = look_at (camera_pos,
-                              VECT3(0,0,0),
-                              VECT3(0,1,0));
-        glUniformMatrix4fv (cube_scene->view_loc, 1, GL_TRUE, view.E);
-
-        mat4f projection = perspective_projection (-camera->width_m/2, camera->width_m/2,
-                                                   -camera->height_m/2, camera->height_m/2,
-                                                   camera->near_plane, camera->far_plane);
-        glUniformMatrix4fv (cube_scene->proj_loc, 1, GL_TRUE, projection.E);
-    }
-
-    glClearColor(0.3f, 0.3f, 0.9f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glDrawArrays (GL_TRIANGLES, 0, 36);
-
-    glEnable(GL_STENCIL_TEST);
-
-    glStencilFunc (GL_ALWAYS, 1, 0xFF);
-    glStencilOp (GL_KEEP, GL_KEEP, GL_REPLACE);
-    glStencilMask (0xFF);
-    glDepthMask(GL_FALSE);
-    glClear (GL_STENCIL_BUFFER_BIT);
-
-    glDrawArrays(GL_TRIANGLES, 36, 6);
-
-    glStencilFunc (GL_EQUAL, 1, 0xFF);
-    glStencilMask (0x00);
-    glDepthMask(GL_TRUE);
-
-    mat4f reflection_trans = {{
-        1, 0, 0, 0,
-        0,-1, 0,-1,
-        0, 0, 1, 0,
-        0, 0, 0, 1
-    }};
-    mat4f reflection_model = mat4f_mult (reflection_trans, model);
-
-    glUniformMatrix4fv (cube_scene->model_loc, 1, GL_TRUE, reflection_model.E);
-
-    glUniform1f (cube_scene->override_loc, 0.2f);
-    glDrawArrays (GL_TRIANGLES, 0, 36);
-    glUniform1f (cube_scene->override_loc, 1.0f);
-    glDisable(GL_STENCIL_TEST);
 }
 
 struct gl_framebuffer_t {
@@ -655,14 +479,6 @@ void render_textured_quad (struct textured_quad_t *quad, GLuint texture,
     glDrawArrays (GL_TRIANGLES, 0, 6);
 }
 
-struct closet_canvas_t {
-    GLuint program_id;
-    GLuint model_loc;
-    GLuint view_loc;
-    GLuint proj_loc;
-    GLuint vao;
-};
-
 enum faces_t {
     RIGHT_FACE, //  X
     LEFT_FACE,  // -X
@@ -672,90 +488,167 @@ enum faces_t {
     BACK_FACE   // -Z
 };
 
+// NOTE: Naming is based on the first letter of the 3 faces that contain the
+// vertex in XYZ order.
+// NOTE: Ordering is lexicographic assuming it's a unit cube with LDB point
+// located at (0,0,0). Then coordinates in binary are ordered lexicographically.
+
+enum cube_vertices_t {
+    LDB, // 000
+    LDF, // 001
+    LUB, // 010
+    LUF, // 011
+    RDB, // 100
+    RDF, // 101
+    RUB, // 110
+    RUF  // 111
+};
+
+struct cuboid_t {
+    vec3f v[8];
+};
+
+void cuboid_print (struct cuboid_t *cb)
+{
+    int i;
+    for (i=0; i<8; i++) {
+        vec3f_print (cb->v[i]);
+    }
+}
+
+#define UNIT_CUBE (struct cuboid_t){{\
+                    VEC3F(-1,-1,-1), \
+                    VEC3F(-1,-1, 1), \
+                    VEC3F(-1, 1,-1), \
+                    VEC3F(-1, 1, 1), \
+                    VEC3F( 1,-1,-1), \
+                    VEC3F( 1,-1, 1), \
+                    VEC3F( 1, 1,-1), \
+                    VEC3F( 1, 1, 1), \
+                   }}
+
+struct closet_canvas_t {
+    GLuint program_id;
+    GLuint model_loc;
+    GLuint view_loc;
+    GLuint proj_loc;
+    GLuint vao;
+};
+
+#define VA_CUBOID_SIZE (36*6*sizeof(float))
+
+float* put_cuboid_in_vertex_array (struct cuboid_t *cuboid, float *dest)
+{
+    vec3f ldb = cuboid->v[0];
+    vec3f ldf = cuboid->v[1];
+    vec3f lub = cuboid->v[2];
+    vec3f luf = cuboid->v[3];
+    vec3f rdb = cuboid->v[4];
+    vec3f rdf = cuboid->v[5];
+    vec3f rub = cuboid->v[6];
+    vec3f ruf = cuboid->v[7];
+
+    float vertex_array[] = {
+     // Coords                Normals
+        rdb.x, rdb.y, rdb.z,  0.0f,  0.0f, -1.0f,
+        ldb.x, ldb.y, ldb.z,  0.0f,  0.0f, -1.0f,
+        rub.x, rub.y, rub.z,  0.0f,  0.0f, -1.0f,
+        lub.x, lub.y, lub.z,  0.0f,  0.0f, -1.0f,
+        rub.x, rub.y, rub.z,  0.0f,  0.0f, -1.0f,
+        ldb.x, ldb.y, ldb.z,  0.0f,  0.0f, -1.0f,
+
+        ldf.x, ldf.y, ldf.z,  0.0f,  0.0f,  1.0f,
+        rdf.x, rdf.y, rdf.z,  0.0f,  0.0f,  1.0f,
+        ruf.x, ruf.y, ruf.z,  0.0f,  0.0f,  1.0f,
+        ruf.x, ruf.y, ruf.z,  0.0f,  0.0f,  1.0f,
+        luf.x, luf.y, luf.z,  0.0f,  0.0f,  1.0f,
+        ldf.x, ldf.y, ldf.z,  0.0f,  0.0f,  1.0f,
+
+        luf.x, luf.y, luf.z, -1.0f,  0.0f,  0.0f,
+        lub.x, lub.y, lub.z, -1.0f,  0.0f,  0.0f,
+        ldb.x, ldb.y, ldb.z, -1.0f,  0.0f,  0.0f,
+        ldb.x, ldb.y, ldb.z, -1.0f,  0.0f,  0.0f,
+        ldf.x, ldf.y, ldf.z, -1.0f,  0.0f,  0.0f,
+        luf.x, luf.y, luf.z, -1.0f,  0.0f,  0.0f,
+
+        rub.x, rub.y, rub.z,  1.0f,  0.0f,  0.0f,
+        ruf.x, ruf.y, ruf.z,  1.0f,  0.0f,  0.0f,
+        rdb.x, rdb.y, rdb.z,  1.0f,  0.0f,  0.0f,
+        rdf.x, rdf.y, rdf.z,  1.0f,  0.0f,  0.0f,
+        rdb.x, rdb.y, rdb.z,  1.0f,  0.0f,  0.0f,
+        ruf.x, ruf.y, ruf.z,  1.0f,  0.0f,  0.0f,
+
+        ldb.x, ldb.y, ldb.z,  0.0f, -1.0f,  0.0f,
+        rdb.x, rdb.y, rdb.z,  0.0f, -1.0f,  0.0f,
+        rdf.x, rdf.y, rdf.z,  0.0f, -1.0f,  0.0f,
+        rdf.x, rdf.y, rdf.z,  0.0f, -1.0f,  0.0f,
+        ldf.x, ldf.y, ldf.z,  0.0f, -1.0f,  0.0f,
+        ldb.x, ldb.y, ldb.z,  0.0f, -1.0f,  0.0f,
+
+        lub.x, lub.y, lub.z,  0.0f,  1.0f,  0.0f,
+        ruf.x, ruf.y, ruf.z,  0.0f,  1.0f,  0.0f,
+        rub.x, rub.y, rub.z,  0.0f,  1.0f,  0.0f,
+        luf.x, luf.y, luf.z,  0.0f,  1.0f,  0.0f,
+        ruf.x, ruf.y, ruf.z,  0.0f,  1.0f,  0.0f,
+        lub.x, lub.y, lub.z,  0.0f,  1.0f,  0.0f,
+    };
+
+    memcpy (dest, vertex_array, sizeof(vertex_array));
+    return (float*)((uint8_t*)dest + sizeof (vertex_array));
+}
+
 struct closet_canvas_t init_closet_canvas ()
 {
     struct closet_canvas_t scene;
 
-    float unit_cube[] = {
-        // Cube
-         1.0f, -1.0f, -1.0f,  0.0f,  0.0f, -1.0f,
-        -1.0f, -1.0f, -1.0f,  0.0f,  0.0f, -1.0f,
-         1.0f,  1.0f, -1.0f,  0.0f,  0.0f, -1.0f,
-        -1.0f,  1.0f, -1.0f,  0.0f,  0.0f, -1.0f,
-         1.0f,  1.0f, -1.0f,  0.0f,  0.0f, -1.0f,
-        -1.0f, -1.0f, -1.0f,  0.0f,  0.0f, -1.0f,
-
-        -1.0f, -1.0f,  1.0f,  0.0f,  0.0f,  1.0f,
-         1.0f, -1.0f,  1.0f,  0.0f,  0.0f,  1.0f,
-         1.0f,  1.0f,  1.0f,  0.0f,  0.0f,  1.0f,
-         1.0f,  1.0f,  1.0f,  0.0f,  0.0f,  1.0f,
-        -1.0f,  1.0f,  1.0f,  0.0f,  0.0f,  1.0f,
-        -1.0f, -1.0f,  1.0f,  0.0f,  0.0f,  1.0f,
-
-        -1.0f,  1.0f,  1.0f, -1.0f,  0.0f,  0.0f,
-        -1.0f,  1.0f, -1.0f, -1.0f,  0.0f,  0.0f,
-        -1.0f, -1.0f, -1.0f, -1.0f,  0.0f,  0.0f,
-        -1.0f, -1.0f, -1.0f, -1.0f,  0.0f,  0.0f,
-        -1.0f, -1.0f,  1.0f, -1.0f,  0.0f,  0.0f,
-        -1.0f,  1.0f,  1.0f, -1.0f,  0.0f,  0.0f,
-
-         1.0f,  1.0f, -1.0f,  1.0f,  0.0f,  0.0f,
-         1.0f,  1.0f,  1.0f,  1.0f,  0.0f,  0.0f,
-         1.0f, -1.0f, -1.0f,  1.0f,  0.0f,  0.0f,
-         1.0f, -1.0f,  1.0f,  1.0f,  0.0f,  0.0f,
-         1.0f, -1.0f, -1.0f,  1.0f,  0.0f,  0.0f,
-         1.0f,  1.0f,  1.0f,  1.0f,  0.0f,  0.0f,
-
-        -1.0f, -1.0f, -1.0f,  0.0f, -1.0f,  0.0f,
-         1.0f, -1.0f, -1.0f,  0.0f, -1.0f,  0.0f,
-         1.0f, -1.0f,  1.0f,  0.0f, -1.0f,  0.0f,
-         1.0f, -1.0f,  1.0f,  0.0f, -1.0f,  0.0f,
-        -1.0f, -1.0f,  1.0f,  0.0f, -1.0f,  0.0f,
-        -1.0f, -1.0f, -1.0f,  0.0f, -1.0f,  0.0f,
-
-        -1.0f,  1.0f, -1.0f,  0.0f,  1.0f,  0.0f,
-         1.0f,  1.0f,  1.0f,  0.0f,  1.0f,  0.0f,
-         1.0f,  1.0f, -1.0f,  0.0f,  1.0f,  0.0f,
-        -1.0f,  1.0f,  1.0f,  0.0f,  1.0f,  0.0f,
-         1.0f,  1.0f,  1.0f,  0.0f,  1.0f,  0.0f,
-        -1.0f,  1.0f, -1.0f,  0.0f,  1.0f,  0.0f,
-    };
-
     float separation = 0.025;
     vec3f dim = VEC3F (0.9, 0.4, 0.7);
 
+    int num_cubes = 3;
     mem_pool_t pool = {0};
-    float *vertices = mem_pool_push_size (&pool, sizeof(unit_cube)*2);
+    float *vertices = mem_pool_push_size (&pool, VA_CUBOID_SIZE*num_cubes);
+    float *vert_ptr = vertices;
 
-    int i, k = 0;
-    for (i=0; i<ARRAY_SIZE (unit_cube); i+=6) {
-        vertices[k+i] = dim.x/2 * unit_cube[i];
-        vertices[k+i+1] = dim.y/2 * unit_cube[i+1];
-        vertices[k+i+2] = dim.z/2 * unit_cube[i+2];
+    {
+        struct cuboid_t hole = UNIT_CUBE;
 
-        // Copy normals
-        vertices[k+i+3] = unit_cube[i+3];
-        vertices[k+i+4] = unit_cube[i+4];
-        vertices[k+i+5] = unit_cube[i+5];
+        int i;
+        for (i=0; i<8; i++) {
+            hole.v[i].x = hole.v[i].x * dim.x/2;
+            hole.v[i].y = hole.v[i].y * dim.y/2;
+            hole.v[i].z = hole.v[i].z * dim.z/2;
+        }
+        vert_ptr = put_cuboid_in_vertex_array (&hole, vert_ptr);
     }
 
-    k = i;
     vec3f prev_box_anchor = VEC3F (dim.x/2, dim.y/2 + separation, dim.z/2);
-
     dim = VEC3F (0.8, 0.4, 0.7);
     vec3f new_box_anchor = VEC3F (dim.x/2, -dim.y/2, dim.z/2);
-
     vec3f disp = vec3f_subs (prev_box_anchor, new_box_anchor);
+    {
+        struct cuboid_t hole = UNIT_CUBE;
+        int i;
+        for (i=0; i<8; i++) {
+            hole.v[i].x = hole.v[i].x * dim.x/2 + disp.x;
+            hole.v[i].y = hole.v[i].y * dim.y/2 + disp.y;
+            hole.v[i].z = hole.v[i].z * dim.z/2 + disp.z;
+        }
+        vert_ptr = put_cuboid_in_vertex_array (&hole, vert_ptr);
+    }
 
-    for (i=0; i<ARRAY_SIZE (unit_cube); i+=6) {
-        vertices[k+i] = dim.x/2 * unit_cube[i] + disp.x;
-        vertices[k+i+1] = dim.y/2 * unit_cube[i+1] + disp.y;
-        vertices[k+i+2] = dim.z/2 * unit_cube[i+2] + disp.z;
-
-        // Copy normals
-        vertices[k+i+3] = unit_cube[i+3];
-        vertices[k+i+4] = unit_cube[i+4];
-        vertices[k+i+5] = unit_cube[i+5];
+    prev_box_anchor = VEC3F (dim.x/2 + disp.x + separation, dim.y/2 + disp.y, dim.z/2 + disp.z);
+    dim = VEC3F (0.3, 0.6, 0.7);
+    new_box_anchor = VEC3F (-dim.x/2, dim.y/2, dim.z/2);
+    disp = vec3f_subs (prev_box_anchor, new_box_anchor);
+    {
+        struct cuboid_t hole = UNIT_CUBE;
+        int i;
+        for (i=0; i<8; i++) {
+            hole.v[i].x = hole.v[i].x * dim.x/2 + disp.x;
+            hole.v[i].y = hole.v[i].y * dim.y/2 + disp.y;
+            hole.v[i].z = hole.v[i].z * dim.z/2 + disp.z;
+        }
+        vert_ptr = put_cuboid_in_vertex_array (&hole, vert_ptr);
     }
 
     glGenVertexArrays (1, &scene.vao);
@@ -764,7 +657,7 @@ struct closet_canvas_t init_closet_canvas ()
     GLuint vbo;
     glGenBuffers (1, &vbo);
     glBindBuffer (GL_ARRAY_BUFFER, vbo);
-    glBufferData (GL_ARRAY_BUFFER, sizeof(unit_cube)*2, vertices, GL_STATIC_DRAW);
+    glBufferData (GL_ARRAY_BUFFER, VA_CUBOID_SIZE*num_cubes, vertices, GL_STATIC_DRAW);
 
     scene.program_id = gl_program ("vertex_shader.glsl", "fragment_shader.glsl");
     if (!scene.program_id) {
@@ -805,9 +698,9 @@ void render_closet (struct closet_canvas_t *closet_canvas, struct camera_t *came
                                                camera->near_plane, camera->far_plane);
     glUniformMatrix4fv (closet_canvas->proj_loc, 1, GL_TRUE, projection.E);
 
-    glClearColor(0.3f, 0.3f, 0.9f, 1.0f);
+    glClearColor(0.164f, 0.203f, 0.223f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glDrawArrays (GL_TRIANGLES, 0, 36*2);
+    glDrawArrays (GL_TRIANGLES, 0, 36*3);
 }
 
 bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_input_t input)
@@ -1671,8 +1564,6 @@ int main (void)
     struct app_state_t *st =
         (struct app_state_t*)mem_pool_push_size_full (&bootstrap, sizeof(struct app_state_t), POOL_ZERO_INIT);
     st->memory = bootstrap;
-
-    app_input.start_ticks = rdtsc ();
 
     while (!st->end_execution) {
         while ((event = xcb_poll_for_event (x_st->xcb_c))) {

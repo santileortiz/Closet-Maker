@@ -684,9 +684,14 @@ vec3f vec3f_normalize (vec3f v)
     return res;
 }
 
-void vec3f_print (vec3f v)
+void vec3f_print_norm (vec3f v)
 {
     printf ("(%f, %f, %f) [%f]\n", v.x, v.y, v.z, vec3f_norm(v));
+}
+
+void vec3f_print (vec3f v)
+{
+    printf ("(%f, %f, %f)\n", v.x, v.y, v.z);
 }
 
 typedef union {
