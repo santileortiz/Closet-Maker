@@ -597,59 +597,126 @@ float* put_cuboid_in_vertex_array (struct cuboid_t *cuboid, float *dest)
     return (float*)((uint8_t*)dest + sizeof (vertex_array));
 }
 
+void compute_hole_first (vec3f dim, struct cuboid_t *res)
+{
+    *res = UNIT_CUBE;
+
+    int i;
+    for (i=0; i<8; i++) {
+        res->v[i].x = res->v[i].x * dim.x/2;
+        res->v[i].y = res->v[i].y * dim.y/2;
+        res->v[i].z = res->v[i].z * dim.z/2;
+    }
+}
+
+void compute_hole (vec3f dim, struct cuboid_t *base, enum faces_t face, enum cube_vertices_t anchor_id,
+                   float separation, struct cuboid_t *res)
+{
+    *res = UNIT_CUBE;
+
+    switch (face) {
+        case RIGHT_FACE:
+            anchor_id |= 0x4;
+            break;
+        case LEFT_FACE:
+            anchor_id &= ~0x4;
+            break;
+        case UP_FACE:
+            anchor_id |= 0x2;
+            break;
+        case DOWN_FACE:
+            anchor_id &= ~0x2;
+            break;
+        case FRONT_FACE:
+            anchor_id |= 0x1;
+            break;
+        case BACK_FACE:
+            anchor_id &= ~0x1;
+            break;
+    }
+
+    vec3f base_anchor = base->v[anchor_id];
+
+    switch (face) {
+        case RIGHT_FACE:
+            base_anchor.x += separation;
+            break;
+        case LEFT_FACE:
+            base_anchor.x -= separation;
+            break;
+        case UP_FACE:
+            base_anchor.y += separation;
+            break;
+        case DOWN_FACE:
+            base_anchor.y -= separation;
+            break;
+        case FRONT_FACE:
+            base_anchor.z += separation;
+            break;
+        case BACK_FACE:
+            base_anchor.z -= separation;
+            break;
+        default:
+            invalid_code_path;
+    }
+
+    uint8_t new_anchor_id;
+    switch (face) {
+        case RIGHT_FACE:
+        case LEFT_FACE:
+            new_anchor_id = (anchor_id & ~0x04) | ((anchor_id ^ 0xFF) & 0x4);
+            break;
+        case UP_FACE:
+        case DOWN_FACE:
+            new_anchor_id = (anchor_id & ~0x02) | ((anchor_id ^ 0xFF) & 0x2);
+            break;
+        case FRONT_FACE:
+        case BACK_FACE:
+            new_anchor_id = (anchor_id & ~0x01) | ((anchor_id ^ 0xFF) & 0x1);
+            break;
+        default:
+            invalid_code_path;
+    }
+
+    // NOTE: res == unit cube.
+    vec3f new_anchor = res->v[new_anchor_id];
+    new_anchor.x *= dim.x/2;
+    new_anchor.y *= dim.y/2;
+    new_anchor.z *= dim.z/2;
+
+    vec3f disp = vec3f_subs (base_anchor, new_anchor);
+
+    int i;
+    for (i=0; i<8; i++) {
+        res->v[i].x = res->v[i].x * dim.x/2 + disp.x;
+        res->v[i].y = res->v[i].y * dim.y/2 + disp.y;
+        res->v[i].z = res->v[i].z * dim.z/2 + disp.z;
+    }
+}
+
 struct closet_canvas_t init_closet_canvas ()
 {
     struct closet_canvas_t scene;
 
     float separation = 0.025;
-    vec3f dim = VEC3F (0.9, 0.4, 0.7);
 
-    int num_cubes = 3;
+    int num_holes = 3;
+    struct cuboid_t holes[num_holes];
     mem_pool_t pool = {0};
-    float *vertices = mem_pool_push_size (&pool, VA_CUBOID_SIZE*num_cubes);
+    float *vertices = mem_pool_push_size (&pool, VA_CUBOID_SIZE*num_holes);
     float *vert_ptr = vertices;
 
-    {
-        struct cuboid_t hole = UNIT_CUBE;
+    vec3f dim = VEC3F (0.9, 0.4, 0.7);
+    compute_hole_first (dim, &holes[0]);
+    vert_ptr = put_cuboid_in_vertex_array (&holes[0], vert_ptr);
 
-        int i;
-        for (i=0; i<8; i++) {
-            hole.v[i].x = hole.v[i].x * dim.x/2;
-            hole.v[i].y = hole.v[i].y * dim.y/2;
-            hole.v[i].z = hole.v[i].z * dim.z/2;
-        }
-        vert_ptr = put_cuboid_in_vertex_array (&hole, vert_ptr);
-    }
-
-    vec3f prev_box_anchor = VEC3F (dim.x/2, dim.y/2 + separation, dim.z/2);
     dim = VEC3F (0.8, 0.4, 0.7);
-    vec3f new_box_anchor = VEC3F (dim.x/2, -dim.y/2, dim.z/2);
-    vec3f disp = vec3f_subs (prev_box_anchor, new_box_anchor);
-    {
-        struct cuboid_t hole = UNIT_CUBE;
-        int i;
-        for (i=0; i<8; i++) {
-            hole.v[i].x = hole.v[i].x * dim.x/2 + disp.x;
-            hole.v[i].y = hole.v[i].y * dim.y/2 + disp.y;
-            hole.v[i].z = hole.v[i].z * dim.z/2 + disp.z;
-        }
-        vert_ptr = put_cuboid_in_vertex_array (&hole, vert_ptr);
-    }
+    compute_hole (dim, &holes[0], UP_FACE, RUF, separation, &holes[1]);
+    vert_ptr = put_cuboid_in_vertex_array (&holes[1], vert_ptr);
 
-    prev_box_anchor = VEC3F (dim.x/2 + disp.x + separation, dim.y/2 + disp.y, dim.z/2 + disp.z);
     dim = VEC3F (0.3, 0.6, 0.7);
-    new_box_anchor = VEC3F (-dim.x/2, dim.y/2, dim.z/2);
-    disp = vec3f_subs (prev_box_anchor, new_box_anchor);
-    {
-        struct cuboid_t hole = UNIT_CUBE;
-        int i;
-        for (i=0; i<8; i++) {
-            hole.v[i].x = hole.v[i].x * dim.x/2 + disp.x;
-            hole.v[i].y = hole.v[i].y * dim.y/2 + disp.y;
-            hole.v[i].z = hole.v[i].z * dim.z/2 + disp.z;
-        }
-        vert_ptr = put_cuboid_in_vertex_array (&hole, vert_ptr);
-    }
+    compute_hole (dim, &holes[1], RIGHT_FACE, RUF, separation, &holes[2]);
+    vert_ptr = put_cuboid_in_vertex_array (&holes[2], vert_ptr);
 
     glGenVertexArrays (1, &scene.vao);
     glBindVertexArray (scene.vao);
@@ -657,7 +724,7 @@ struct closet_canvas_t init_closet_canvas ()
     GLuint vbo;
     glGenBuffers (1, &vbo);
     glBindBuffer (GL_ARRAY_BUFFER, vbo);
-    glBufferData (GL_ARRAY_BUFFER, VA_CUBOID_SIZE*num_cubes, vertices, GL_STATIC_DRAW);
+    glBufferData (GL_ARRAY_BUFFER, VA_CUBOID_SIZE*num_holes, vertices, GL_STATIC_DRAW);
 
     scene.program_id = gl_program ("vertex_shader.glsl", "fragment_shader.glsl");
     if (!scene.program_id) {
