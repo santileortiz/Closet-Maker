@@ -527,7 +527,14 @@ void cuboid_print (struct cuboid_t *cb)
                     VEC3F( 1, 1, 1), \
                    }}
 
-struct closet_canvas_t {
+struct closet_t {
+    mem_pool_t pool;
+
+    struct cuboid_t *holes;
+    struct cuboid_t *separators;
+};
+
+struct closet_scene_t {
     GLuint program_id;
     GLuint model_loc;
     GLuint view_loc;
@@ -539,6 +546,8 @@ struct closet_canvas_t {
     GLuint holes_vao;
     uint32_t num_seps;
     GLuint seps_vao;
+
+    struct closet_t cl;
 };
 
 #define VA_CUBOID_SIZE (36*6*sizeof(float))
@@ -700,78 +709,24 @@ void compute_hole (vec3f dim, struct cuboid_t *base, enum faces_t face, enum cub
     }
 }
 
-struct closet_canvas_t init_closet_canvas ()
+struct closet_scene_t init_closet_scene (float num_holes, float num_seps)
 {
-    struct closet_canvas_t scene;
+    struct closet_scene_t scene = {0};
 
-    float separation = 0.025;
-
-    scene.num_holes = 3;
-    struct cuboid_t holes[scene.num_holes];
-
-    vec3f dim = VEC3F (0.9, 0.4, 0.7);
-    compute_hole_first (dim, &holes[0]);
-
-    dim = VEC3F (0.8, 0.4, 0.7);
-    compute_hole (dim, &holes[0], UP_FACE, RUF, separation, &holes[1]);
-
-    dim = VEC3F (0.3, 0.6, 0.7);
-    compute_hole (dim, &holes[1], RIGHT_FACE, RUF, separation, &holes[2]);
+    scene.num_holes = num_holes;
+    scene.cl.holes = mem_pool_push_size (&scene.cl.pool,
+                                         num_holes*sizeof(struct cuboid_t));
+    scene.num_seps = num_seps;
+    scene.cl.separators = mem_pool_push_size (&scene.cl.pool,
+                                              num_seps*sizeof(struct cuboid_t));
 
     scene.program_id = gl_program ("vertex_shader.glsl", "fragment_shader.glsl");
     if (!scene.program_id) {
         return scene;
     }
 
-    GLint pos_attr = glGetAttribLocation (scene.program_id, "position");
-    GLint normal_attr = glGetAttribLocation (scene.program_id, "in_normal");
-
-    mem_pool_t pool = {0};
-    float *vertices = mem_pool_push_size (&pool, VA_CUBOID_SIZE*scene.num_holes);
-    float *vert_ptr = vertices;
-    int i;
-    for (i = 0; i<scene.num_holes; i++) {
-        vert_ptr = put_cuboid_in_vertex_array (&holes[i], vert_ptr);
-    }
-
     glGenVertexArrays (1, &scene.holes_vao);
-    glBindVertexArray (scene.holes_vao);
-
-      GLuint vbo;
-      glGenBuffers (1, &vbo);
-      glBindBuffer (GL_ARRAY_BUFFER, vbo);
-      glBufferData (GL_ARRAY_BUFFER, VA_CUBOID_SIZE*scene.num_holes, vertices, GL_STATIC_DRAW);
-
-      glEnableVertexAttribArray (pos_attr);
-      glVertexAttribPointer (pos_attr, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), 0);
-
-      glEnableVertexAttribArray (normal_attr);
-      glVertexAttribPointer (normal_attr, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), (void*)(3*sizeof(float)));
-
-
-    scene.num_seps = 1;
-    struct cuboid_t separators[scene.num_seps];
-    dim = VEC3F (0.8, 0.4, 0.7);
-    compute_hole (dim, &holes[0], DOWN_FACE, RUF, separation, &separators[0]);
-
-    vertices = mem_pool_push_size (&pool, VA_CUBOID_SIZE*scene.num_seps);
-    vert_ptr = vertices;
-    for (i = 0; i<scene.num_seps; i++) {
-        vert_ptr = put_cuboid_in_vertex_array (&separators[i], vert_ptr);
-    }
-
     glGenVertexArrays (1, &scene.seps_vao);
-    glBindVertexArray (scene.seps_vao);
-
-      glGenBuffers (1, &vbo);
-      glBindBuffer (GL_ARRAY_BUFFER, vbo);
-      glBufferData (GL_ARRAY_BUFFER, VA_CUBOID_SIZE*scene.num_seps, vertices, GL_STATIC_DRAW);
-
-      glEnableVertexAttribArray (pos_attr);
-      glVertexAttribPointer (pos_attr, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), 0);
-
-      glEnableVertexAttribArray (normal_attr);
-      glVertexAttribPointer (normal_attr, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), (void*)(3*sizeof(float)));
 
     scene.model_loc = glGetUniformLocation (scene.program_id, "model");
     scene.view_loc = glGetUniformLocation (scene.program_id, "view");
@@ -781,23 +736,70 @@ struct closet_canvas_t init_closet_canvas ()
     return scene;
 }
 
-void render_closet (struct closet_canvas_t *closet_canvas, struct camera_t *camera)
+void update_closet_scene (struct closet_scene_t *scene, struct closet_t *cl)
 {
-    glUseProgram (closet_canvas->program_id);
+    mem_pool_t pool = {0};
+    float *vertices = mem_pool_push_size (&pool, VA_CUBOID_SIZE*scene->num_holes);
+    float *vert_ptr = vertices;
+    int i;
+    for (i = 0; i<scene->num_holes; i++) {
+        vert_ptr = put_cuboid_in_vertex_array (&cl->holes[i], vert_ptr);
+    }
+
+    GLint pos_attr = glGetAttribLocation (scene->program_id, "position");
+    GLint normal_attr = glGetAttribLocation (scene->program_id, "in_normal");
+
+    glBindVertexArray (scene->holes_vao);
+
+      GLuint vbo;
+      glGenBuffers (1, &vbo);
+      glBindBuffer (GL_ARRAY_BUFFER, vbo);
+      glBufferData (GL_ARRAY_BUFFER, VA_CUBOID_SIZE*scene->num_holes, vertices, GL_STATIC_DRAW);
+
+      glEnableVertexAttribArray (pos_attr);
+      glVertexAttribPointer (pos_attr, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), 0);
+
+      glEnableVertexAttribArray (normal_attr);
+      glVertexAttribPointer (normal_attr, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), (void*)(3*sizeof(float)));
+
+    vertices = mem_pool_push_size (&pool, VA_CUBOID_SIZE*scene->num_seps);
+    vert_ptr = vertices;
+    for (i = 0; i<scene->num_seps; i++) {
+        vert_ptr = put_cuboid_in_vertex_array (&cl->separators[i], vert_ptr);
+    }
+
+    glBindVertexArray (scene->seps_vao);
+
+      glGenBuffers (1, &vbo);
+      glBindBuffer (GL_ARRAY_BUFFER, vbo);
+      glBufferData (GL_ARRAY_BUFFER, VA_CUBOID_SIZE*scene->num_seps, vertices, GL_STATIC_DRAW);
+
+      glEnableVertexAttribArray (pos_attr);
+      glVertexAttribPointer (pos_attr, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), 0);
+
+      glEnableVertexAttribArray (normal_attr);
+      glVertexAttribPointer (normal_attr, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), (void*)(3*sizeof(float)));
+
+    mem_pool_destroy (&pool);
+}
+
+void render_closet (struct closet_scene_t *closet_scene, struct camera_t *camera)
+{
+    glUseProgram (closet_scene->program_id);
 
     mat4f model = rotation_y (0);
-    glUniformMatrix4fv (closet_canvas->model_loc, 1, GL_TRUE, model.E);
+    glUniformMatrix4fv (closet_scene->model_loc, 1, GL_TRUE, model.E);
 
     vect3_t camera_pos = camera_compute_pos (camera);
     mat4f view = look_at (camera_pos,
                           VECT3(0,0,0),
                           VECT3(0,1,0));
-    glUniformMatrix4fv (closet_canvas->view_loc, 1, GL_TRUE, view.E);
+    glUniformMatrix4fv (closet_scene->view_loc, 1, GL_TRUE, view.E);
 
     mat4f projection = perspective_projection (-camera->width_m/2, camera->width_m/2,
                                                -camera->height_m/2, camera->height_m/2,
                                                camera->near_plane, camera->far_plane);
-    glUniformMatrix4fv (closet_canvas->proj_loc, 1, GL_TRUE, projection.E);
+    glUniformMatrix4fv (closet_scene->proj_loc, 1, GL_TRUE, projection.E);
 
     glClearColor(0.164f, 0.203f, 0.223f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -805,15 +807,15 @@ void render_closet (struct closet_canvas_t *closet_canvas, struct camera_t *came
     glEnable (GL_DEPTH_TEST);
 
     // Render holes
-    glBindVertexArray (closet_canvas->holes_vao);
-    glUniform4f (closet_canvas->color_loc, 1, 1, 1, 1);
-    glDrawArrays (GL_TRIANGLES, 0, 36*closet_canvas->num_holes);
+    glBindVertexArray (closet_scene->holes_vao);
+    glUniform4f (closet_scene->color_loc, 1, 1, 1, 1);
+    glDrawArrays (GL_TRIANGLES, 0, 36*closet_scene->num_holes);
 
     // Render separators
-    glBindVertexArray (closet_canvas->seps_vao);
+    glBindVertexArray (closet_scene->seps_vao);
     glDepthMask (GL_FALSE);
-    glUniform4f (closet_canvas->color_loc, 1, 1, 0, 0.4);
-    glDrawArrays (GL_TRIANGLES, 0, 36*closet_canvas->num_seps);
+    glUniform4f (closet_scene->color_loc, 1, 1, 0, 0.4);
+    glDrawArrays (GL_TRIANGLES, 0, 36*closet_scene->num_seps);
     glDepthMask (GL_TRUE);
 }
 
@@ -842,18 +844,34 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
             break;
     }
 
-    static struct closet_canvas_t closet_canvas;
+    static struct closet_scene_t closet_scene;
     static bool run_once = false;
     static struct camera_t main_camera;
 
     if (!run_once) {
         run_once = true;
 
-        closet_canvas = init_closet_canvas ();
-        if (closet_canvas.program_id == 0) {
+        closet_scene = init_closet_scene (3, 1);
+        if (closet_scene.program_id == 0) {
             st->end_execution = true;
             return blit_needed;
         }
+
+        float separation = 0.025;
+        struct closet_t *cl = &closet_scene.cl;
+        vec3f dim = VEC3F (0.9, 0.4, 0.7);
+        compute_hole_first (dim, &cl->holes[0]);
+
+        dim = VEC3F (0.8, 0.4, 0.7);
+        compute_hole (dim, &cl->holes[0], UP_FACE, RUF, separation, &cl->holes[1]);
+
+        dim = VEC3F (0.3, 0.6, 0.7);
+        compute_hole (dim, &cl->holes[1], RIGHT_FACE, RUF, separation, &cl->holes[2]);
+
+        dim = VEC3F (0.8, 0.4, 0.7);
+        compute_hole (dim, &cl->holes[0], DOWN_FACE, RUF, separation, &cl->separators[0]);
+
+        update_closet_scene (&closet_scene, cl);
 
         main_camera.near_plane = 0.1;
         main_camera.far_plane = 100;
@@ -876,7 +894,7 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     main_camera.height_m = px_to_m_y (graphics, graphics->height);
 
     draw_into_window (graphics);
-    render_closet (&closet_canvas, &main_camera);
+    render_closet (&closet_scene, &main_camera);
 
     return true;
 }
