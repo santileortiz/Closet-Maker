@@ -495,6 +495,10 @@ enum cube_vertices_t {
     RUF  // 111
 };
 
+#define VERT_FACE_X(vert) ((vert&0x4)?RIGHT_FACE:LEFT_FACE)
+#define VERT_FACE_Y(vert) ((vert&0x2)?UP_FACE:DOWN_FACE)
+#define VERT_FACE_Z(vert) ((vert&0x1)?FRONT_FACE:BACK_FACE)
+
 struct cuboid_t {
     vec3f v[8];
 };
@@ -509,6 +513,33 @@ void cuboid_print (struct cuboid_t *cb)
     for (i=0; i<8; i++) {
         vec3f_print (cb->v[i]);
     }
+}
+
+static inline
+float cuboid_face_coord (struct cuboid_t c, enum faces_t face)
+{
+    float res;
+    switch (face) {
+        case RIGHT_FACE:
+            res = c.v[7].x;
+            break;
+        case LEFT_FACE:
+            res = c.v[0].x;
+            break;
+        case UP_FACE:
+            res = c.v[7].y;
+            break;
+        case DOWN_FACE:
+            res = c.v[0].y;
+            break;
+        case BACK_FACE:
+            res = c.v[7].z;
+            break;
+        case FRONT_FACE:
+            res = c.v[0].z;
+            break;
+    }
+    return res;
 }
 
 #define UNIT_CUBE (struct cuboid_t){{\
@@ -557,7 +588,7 @@ struct hole_dimension_t {
 #define DIM_F(n) (struct hole_dimension_t){DIMENSION_DIRECT,{n}}
 #define DIM_COPY (struct hole_dimension_t){DIMENSION_COPY,{0}}
 #define DIM_UNTIL(hole_id,face) (struct hole_dimension_t){DIMENSION_RELATIVE, \
-    {(struct relative_dimension_t){hole_id,face}}}
+    {.rval = (struct relative_dimension_t){hole_id,face}}}
 
 struct hole_dimensions_t {
     struct hole_dimension_t x;
@@ -674,82 +705,18 @@ void compute_hole_first (vec3f dim, struct cuboid_t *res)
     }
 }
 
-void compute_hole (vec3f dim, struct cuboid_t *base, enum faces_t face, enum cube_vertices_t anchor_id,
-                   float separation, struct cuboid_t *res)
+void compute_cuboid (vec3f dim,
+                     enum cube_vertices_t anchor_id, vec3f anchor_pos,
+                     struct cuboid_t *res)
 {
     *res = UNIT_CUBE;
 
-    switch (face) {
-        case RIGHT_FACE:
-            anchor_id |= 0x4;
-            break;
-        case LEFT_FACE:
-            anchor_id &= ~0x4;
-            break;
-        case UP_FACE:
-            anchor_id |= 0x2;
-            break;
-        case DOWN_FACE:
-            anchor_id &= ~0x2;
-            break;
-        case FRONT_FACE:
-            anchor_id |= 0x1;
-            break;
-        case BACK_FACE:
-            anchor_id &= ~0x1;
-            break;
-    }
-
-    vec3f base_anchor = base->v[anchor_id];
-
-    switch (face) {
-        case RIGHT_FACE:
-            base_anchor.x += separation;
-            break;
-        case LEFT_FACE:
-            base_anchor.x -= separation;
-            break;
-        case UP_FACE:
-            base_anchor.y += separation;
-            break;
-        case DOWN_FACE:
-            base_anchor.y -= separation;
-            break;
-        case FRONT_FACE:
-            base_anchor.z += separation;
-            break;
-        case BACK_FACE:
-            base_anchor.z -= separation;
-            break;
-        default:
-            invalid_code_path;
-    }
-
-    uint8_t new_anchor_id;
-    switch (face) {
-        case RIGHT_FACE:
-        case LEFT_FACE:
-            new_anchor_id = (anchor_id & ~0x04) | ((anchor_id ^ 0xFF) & 0x4);
-            break;
-        case UP_FACE:
-        case DOWN_FACE:
-            new_anchor_id = (anchor_id & ~0x02) | ((anchor_id ^ 0xFF) & 0x2);
-            break;
-        case FRONT_FACE:
-        case BACK_FACE:
-            new_anchor_id = (anchor_id & ~0x01) | ((anchor_id ^ 0xFF) & 0x1);
-            break;
-        default:
-            invalid_code_path;
-    }
-
-    // NOTE: res == unit cube.
-    vec3f new_anchor = res->v[new_anchor_id];
+    vec3f new_anchor = res->v[anchor_id];
     new_anchor.x *= dim.x/2;
     new_anchor.y *= dim.y/2;
     new_anchor.z *= dim.z/2;
 
-    vec3f disp = vec3f_subs (base_anchor, new_anchor);
+    vec3f disp = vec3f_subs (anchor_pos, new_anchor);
 
     int i;
     for (i=0; i<8; i++) {
@@ -761,7 +728,7 @@ void compute_hole (vec3f dim, struct cuboid_t *base, enum faces_t face, enum cub
 
 void push_hole (struct closet_t *cl,
                 struct hole_dimensions_t *dim, uint32_t base_id,
-                enum faces_t face, enum cube_vertices_t anchor_id,
+                enum faces_t face, enum cube_vertices_t base_anchor_id,
                 float separation)
 {
     assert (cl->num_holes > 0);
@@ -769,50 +736,143 @@ void push_hole (struct closet_t *cl,
     // TODO: Grow the hole array instead of failing
     assert (cl->num_holes < cl->size_holes - 1);
 
+    // Ensure the base_anchor_id is in the face received as argument. If it's
+    // not we choose the closest vertex that is in it.
+    switch (face) {
+        case RIGHT_FACE:
+            base_anchor_id |= 0x4;
+            break;
+        case LEFT_FACE:
+            base_anchor_id &= ~0x4;
+            break;
+        case UP_FACE:
+            base_anchor_id |= 0x2;
+            break;
+        case DOWN_FACE:
+            base_anchor_id &= ~0x2;
+            break;
+        case FRONT_FACE:
+            base_anchor_id |= 0x1;
+            break;
+        case BACK_FACE:
+            base_anchor_id &= ~0x1;
+            break;
+    }
+
+    // Compute the position and id for the anchor vertex in the new cuboid
+    uint8_t anchor_id = base_anchor_id;
+    vec3f anchor_pos;
+    {
+        anchor_pos = cl->holes[base_id].v[anchor_id];
+        switch (face) {
+            case RIGHT_FACE:
+                anchor_pos.x += separation;
+                break;
+            case LEFT_FACE:
+                anchor_pos.x -= separation;
+                break;
+            case UP_FACE:
+                anchor_pos.y += separation;
+                break;
+            case DOWN_FACE:
+                anchor_pos.y -= separation;
+                break;
+            case FRONT_FACE:
+                anchor_pos.z += separation;
+                break;
+            case BACK_FACE:
+                anchor_pos.z -= separation;
+                break;
+            default:
+                invalid_code_path;
+        }
+
+        switch (face) {
+            case RIGHT_FACE:
+            case LEFT_FACE:
+                anchor_id = (anchor_id & ~0x04) | ((anchor_id ^ 0xFF) & 0x4);
+                break;
+            case UP_FACE:
+            case DOWN_FACE:
+                anchor_id = (anchor_id & ~0x02) | ((anchor_id ^ 0xFF) & 0x2);
+                break;
+            case FRONT_FACE:
+            case BACK_FACE:
+                anchor_id = (anchor_id & ~0x01) | ((anchor_id ^ 0xFF) & 0x1);
+                break;
+            default:
+                invalid_code_path;
+        }
+    }
+
+    // Compute the size of the new hole
     vec3f dim_vec = VEC3F(0,0,0);
-    switch (dim->x.type) {
-        case DIMENSION_DIRECT:
-            dim_vec.x = dim->x.val;
-            break;
-        case DIMENSION_COPY:
-            dim_vec.x = CUBOID_SIZE_X (cl->holes[base_id]);
-            break;
-        case DIMENSION_RELATIVE:
-            // Not yet implemented;
-            break;
-        default:
-            invalid_code_path;
+    {
+        uint8_t moving_vertex_id = anchor_id^0x7;
+
+        switch (dim->x.type) {
+            case DIMENSION_DIRECT:
+                dim_vec.x = dim->x.val;
+                break;
+            case DIMENSION_COPY:
+                dim_vec.x = CUBOID_SIZE_X (cl->holes[base_id]);
+                break;
+            case DIMENSION_RELATIVE:
+                {
+                    struct relative_dimension_t rval = dim->x.rval;
+                    if (VERT_FACE_X(moving_vertex_id) == rval.face) {
+                        dim_vec.x = fabs (anchor_pos.x - cuboid_face_coord (cl->holes[rval.hole_id], rval.face));
+                    } else {
+                        printf ("Invalid face for relative dimension.\n");
+                    }
+                } break;
+                break;
+            default:
+                invalid_code_path;
+        }
+
+        switch (dim->y.type) {
+            case DIMENSION_DIRECT:
+                dim_vec.y = dim->y.val;
+                break;
+            case DIMENSION_COPY:
+                dim_vec.y = CUBOID_SIZE_Y (cl->holes[base_id]);
+                break;
+            case DIMENSION_RELATIVE:
+                {
+                    struct relative_dimension_t rval = dim->y.rval;
+                    if (VERT_FACE_Y(moving_vertex_id) == rval.face) {
+                        dim_vec.y = fabs (anchor_pos.y - cuboid_face_coord (cl->holes[rval.hole_id], rval.face));
+                    } else {
+                        printf ("Invalid face for relative dimension.\n");
+                    }
+                } break;
+            default:
+                invalid_code_path;
+        }
+
+        switch (dim->z.type) {
+            case DIMENSION_DIRECT:
+                dim_vec.z = dim->z.val;
+                break;
+            case DIMENSION_COPY:
+                dim_vec.z = CUBOID_SIZE_Z (cl->holes[base_id]);
+                break;
+            case DIMENSION_RELATIVE:
+                {
+                    struct relative_dimension_t rval = dim->z.rval;
+                    if (VERT_FACE_Z(moving_vertex_id) == rval.face) {
+                        dim_vec.z = fabs (anchor_pos.z - cuboid_face_coord (cl->holes[rval.hole_id], rval.face));
+                    } else {
+                        printf ("Invalid face for relative dimension.\n");
+                    }
+                } break;
+            default:
+                invalid_code_path;
+        }
     }
 
-    switch (dim->y.type) {
-        case DIMENSION_DIRECT:
-            dim_vec.y = dim->y.val;
-            break;
-        case DIMENSION_COPY:
-            dim_vec.y = CUBOID_SIZE_Y (cl->holes[base_id]);
-            break;
-        case DIMENSION_RELATIVE:
-            // Not yet implemented;
-            break;
-        default:
-            invalid_code_path;
-    }
-
-    switch (dim->z.type) {
-        case DIMENSION_DIRECT:
-            dim_vec.z = dim->z.val;
-            break;
-        case DIMENSION_COPY:
-            dim_vec.z = CUBOID_SIZE_Z (cl->holes[base_id]);
-            break;
-        case DIMENSION_RELATIVE:
-            // Not yet implemented;
-            break;
-        default:
-            invalid_code_path;
-    }
-
-    compute_hole (dim_vec, &cl->holes[base_id], face, anchor_id, separation, &cl->holes[cl->num_holes]);
+    compute_cuboid (dim_vec, anchor_id, anchor_pos, &cl->holes[cl->num_holes]);
     cl->num_holes++;
 }
 
@@ -1076,8 +1136,7 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
         dim = HOLE_DIM (DIM_COPY, DIM_COPY, DIM_COPY);
         push_hole (&cl, &dim, 0, UP_FACE, RUF, separation);
 
-        //dim = HOLE_DIM (DIM_F(0.3), DIM_UNTIL(0, DOWN_FACE), DIM_COPY);
-        dim = HOLE_DIM (DIM_F(0.3), DIM_F(0.6), DIM_COPY);
+        dim = HOLE_DIM (DIM_F(0.3), DIM_UNTIL(0, DOWN_FACE), DIM_COPY);
         push_hole (&cl, &dim, 1, RIGHT_FACE, RUF, separation);
 
         update_closet_scene (&closet_scene, &cl);
