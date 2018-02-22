@@ -418,7 +418,7 @@ struct textured_quad_t init_textured_quad_renderer ()
 //   s1 = res * d1
 //   s2 = res * d2
 static inline
-mat4f transform_form_2_points (vect3_t s1, vect3_t s2, vect3_t d1, vect3_t d2)
+mat4f transform_from_2_points (vect3_t s1, vect3_t s2, vect3_t d1, vect3_t d2)
 {
     float xs, x0, ys, y0, zs, z0;
     if (s1.x != s2.x) {
@@ -465,15 +465,6 @@ void render_textured_quad (struct textured_quad_t *quad, GLuint texture,
     glActiveTexture (GL_TEXTURE0);
     glBindTexture (GL_TEXTURE_2D, texture);
 
-    //vect3_t top_left_ndc = VECT3(-1+x/graphics->width, 1-y/graphics->height, 0);
-    //vect3_t bottom_right_ndc = VECT3(top_left_ndc.x + 2*width_px/graphics->width,
-    //                                 top_left_ndc.y - 2*height_px/graphics->height,
-    //                                 0);
-
-    //mat4f tr = transform_form_2_points (VECT3(-1,1,0), VECT3(1,-1,0),
-    //                                    top_left_ndc, bottom_right_ndc);
-    //glUniformMatrix4fv (quad->transf_loc, 1, GL_TRUE, tr.E);
-
     glViewport (x, graphics->height - y - height_px, width_px, height_px);
     glScissor (x, graphics->height - y - height_px, width_px, height_px);
     glDrawArrays (GL_TRIANGLES, 0, 6);
@@ -508,6 +499,10 @@ struct cuboid_t {
     vec3f v[8];
 };
 
+#define CUBOID_SIZE_X(c) ((c).v[4].x - (c).v[0].x)
+#define CUBOID_SIZE_Y(c) ((c).v[2].y - (c).v[0].y)
+#define CUBOID_SIZE_Z(c) ((c).v[1].z - (c).v[0].z)
+
 void cuboid_print (struct cuboid_t *cb)
 {
     int i;
@@ -530,6 +525,54 @@ void cuboid_print (struct cuboid_t *cb)
 #define NUM_HOLES 30
 #define NUM_SEPARATORS (5*NUM_HOLES)
 #define DEFAULT_SEPARATION 0.025f
+
+struct relative_dimension_t {
+    uint32_t hole_id;
+    enum faces_t face;
+};
+
+// A hole's size in some axis can be specified in 3 ways:
+//
+//   DIM_DIRECT means we have a specific value.
+//
+//   DIM_COPY means we copy the size from the base hole.
+//
+//   DIM_RELATIVE means the moving face will match with a parallel face of
+//   another hole.
+
+enum dimension_type_t {
+    DIMENSION_DIRECT,
+    DIMENSION_COPY,
+    DIMENSION_RELATIVE
+};
+
+struct hole_dimension_t {
+    enum dimension_type_t type;
+    union {
+        float val;
+        struct relative_dimension_t rval;
+    };
+};
+
+#define DIM_F(n) (struct hole_dimension_t){DIMENSION_DIRECT,{n}}
+#define DIM_COPY (struct hole_dimension_t){DIMENSION_COPY,{0}}
+#define DIM_UNTIL(hole_id,face) (struct hole_dimension_t){DIMENSION_RELATIVE, \
+    {(struct relative_dimension_t){hole_id,face}}}
+
+struct hole_dimensions_t {
+    struct hole_dimension_t x;
+    struct hole_dimension_t y;
+    struct hole_dimension_t z;
+};
+
+#define HOLE_DIM_F(x,y,z) (struct hole_dimensions_t){DIM_F(x),DIM_F(y),DIM_F(z)}
+#define HOLE_DIM(x,y,z) (struct hole_dimensions_t){x,y,z}
+
+static inline
+vec3f hole_dim_direct_to_vec3f (struct hole_dimensions_t *dim)
+{
+    return VEC3F (dim->x.val, dim->y.val, dim->z.val );
+}
 
 struct closet_t {
     mem_pool_t pool;
@@ -717,7 +760,7 @@ void compute_hole (vec3f dim, struct cuboid_t *base, enum faces_t face, enum cub
 }
 
 void push_hole (struct closet_t *cl,
-                vec3f dim, uint32_t base_id,
+                struct hole_dimensions_t *dim, uint32_t base_id,
                 enum faces_t face, enum cube_vertices_t anchor_id,
                 float separation)
 {
@@ -726,7 +769,50 @@ void push_hole (struct closet_t *cl,
     // TODO: Grow the hole array instead of failing
     assert (cl->num_holes < cl->size_holes - 1);
 
-    compute_hole (dim, &cl->holes[base_id], face, anchor_id, separation, &cl->holes[cl->num_holes]);
+    vec3f dim_vec = VEC3F(0,0,0);
+    switch (dim->x.type) {
+        case DIMENSION_DIRECT:
+            dim_vec.x = dim->x.val;
+            break;
+        case DIMENSION_COPY:
+            dim_vec.x = CUBOID_SIZE_X (cl->holes[base_id]);
+            break;
+        case DIMENSION_RELATIVE:
+            // Not yet implemented;
+            break;
+        default:
+            invalid_code_path;
+    }
+
+    switch (dim->y.type) {
+        case DIMENSION_DIRECT:
+            dim_vec.y = dim->y.val;
+            break;
+        case DIMENSION_COPY:
+            dim_vec.y = CUBOID_SIZE_Y (cl->holes[base_id]);
+            break;
+        case DIMENSION_RELATIVE:
+            // Not yet implemented;
+            break;
+        default:
+            invalid_code_path;
+    }
+
+    switch (dim->z.type) {
+        case DIMENSION_DIRECT:
+            dim_vec.z = dim->z.val;
+            break;
+        case DIMENSION_COPY:
+            dim_vec.z = CUBOID_SIZE_Z (cl->holes[base_id]);
+            break;
+        case DIMENSION_RELATIVE:
+            // Not yet implemented;
+            break;
+        default:
+            invalid_code_path;
+    }
+
+    compute_hole (dim_vec, &cl->holes[base_id], face, anchor_id, separation, &cl->holes[cl->num_holes]);
     cl->num_holes++;
 }
 
@@ -808,8 +894,12 @@ void compute_separator (struct cuboid_t *base, enum faces_t face, float separati
     }
 }
 
-struct closet_t new_closet (vec3f dim)
+struct closet_t new_closet (struct hole_dimensions_t *dim)
 {
+    assert (dim->x.type == DIMENSION_DIRECT &&
+            dim->y.type == DIMENSION_DIRECT &&
+            dim->z.type == DIMENSION_DIRECT);
+
     struct closet_t res = {0};
     res.size_holes = NUM_HOLES;
     res.holes = mem_pool_push_size (&res.pool,
@@ -818,7 +908,8 @@ struct closet_t new_closet (vec3f dim)
     res.size_separators = NUM_SEPARATORS;
     res.separators = mem_pool_push_size (&res.pool,
                                          NUM_SEPARATORS*sizeof(struct cuboid_t));
-    compute_hole_first (dim, &res.holes[0]);
+    vec3f hole_size = hole_dim_direct_to_vec3f (dim);
+    compute_hole_first (hole_size, &res.holes[0]);
     res.num_holes++;
 
     struct cuboid_t base = res.holes[0];
@@ -979,14 +1070,15 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
         }
 
         float separation = 0.025;
-        vec3f dim = VEC3F (0.9, 0.4, 0.7);
-        struct closet_t cl = new_closet (dim);
+        struct hole_dimensions_t dim = HOLE_DIM_F (0.9, 0.4, 0.7);
+        struct closet_t cl = new_closet (&dim);
 
-        dim = VEC3F (0.8, 0.4, 0.7);
-        push_hole (&cl, dim, 0, UP_FACE, RUF, separation);
+        dim = HOLE_DIM (DIM_COPY, DIM_COPY, DIM_COPY);
+        push_hole (&cl, &dim, 0, UP_FACE, RUF, separation);
 
-        dim = VEC3F (0.3, 0.6, 0.7);
-        push_hole (&cl, dim, 1, RIGHT_FACE, RUF, separation);
+        //dim = HOLE_DIM (DIM_F(0.3), DIM_UNTIL(0, DOWN_FACE), DIM_COPY);
+        dim = HOLE_DIM (DIM_F(0.3), DIM_F(0.6), DIM_COPY);
+        push_hole (&cl, &dim, 1, RIGHT_FACE, RUF, separation);
 
         update_closet_scene (&closet_scene, &cl);
 
