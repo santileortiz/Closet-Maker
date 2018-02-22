@@ -527,10 +527,19 @@ void cuboid_print (struct cuboid_t *cb)
                     VEC3F( 1, 1, 1), \
                    }}
 
+#define NUM_HOLES 30
+#define NUM_SEPARATORS (5*NUM_HOLES)
+#define DEFAULT_SEPARATION 0.025f
+
 struct closet_t {
     mem_pool_t pool;
 
+    uint32_t num_holes;
+    uint32_t size_holes;
     struct cuboid_t *holes;
+
+    uint32_t num_seps;
+    uint32_t size_separators;
     struct cuboid_t *separators;
 };
 
@@ -542,12 +551,10 @@ struct closet_scene_t {
     GLuint color_loc;
     GLuint alpha_loc;
 
-    uint32_t num_holes;
+    uint32_t holes_vao_size;
     GLuint holes_vao;
-    uint32_t num_seps;
+    uint32_t seps_vao_size;
     GLuint seps_vao;
-
-    struct closet_t cl;
 };
 
 #define VA_CUBOID_SIZE (36*6*sizeof(float))
@@ -709,16 +716,128 @@ void compute_hole (vec3f dim, struct cuboid_t *base, enum faces_t face, enum cub
     }
 }
 
-struct closet_scene_t init_closet_scene (float num_holes, float num_seps)
+void push_hole (struct closet_t *cl,
+                vec3f dim, uint32_t base_id,
+                enum faces_t face, enum cube_vertices_t anchor_id,
+                float separation)
+{
+    assert (cl->num_holes > 0);
+
+    // TODO: Grow the hole array instead of failing
+    assert (cl->num_holes < cl->size_holes - 1);
+
+    compute_hole (dim, &cl->holes[base_id], face, anchor_id, separation, &cl->holes[cl->num_holes]);
+    cl->num_holes++;
+}
+
+void compute_separator (struct cuboid_t *base, enum faces_t face, float separation, struct cuboid_t *res)
+{
+    uint8_t face_v[4];
+    uint8_t opposite_face_v[4];
+
+    {
+        uint8_t mask;
+        uint8_t axis_1_cnt = 0;
+        uint8_t *axis_1 = face_v;
+        uint8_t axis_0_cnt = 0;
+        uint8_t *axis_0 = opposite_face_v;
+
+        switch (face) {
+            case LEFT_FACE:
+                axis_0 = face_v;
+                axis_1 = opposite_face_v;
+            case RIGHT_FACE:
+                mask = 0x4;
+                break;
+
+            case DOWN_FACE:
+                axis_0 = face_v;
+                axis_1 = opposite_face_v;
+            case UP_FACE:
+                mask = 0x2;
+                break;
+
+            case BACK_FACE:
+                axis_0 = face_v;
+                axis_1 = opposite_face_v;
+            case FRONT_FACE:
+                mask = 0x1;
+                break;
+        }
+
+        uint8_t i;
+        for (i=0; i<8; i++) {
+            if (i & mask) {
+                axis_1[axis_1_cnt] = i;
+                axis_1_cnt++;
+            } else {
+                axis_0[axis_0_cnt] = i;
+                axis_0_cnt++;
+            }
+        }
+    }
+
+    int i;
+    for (i=0; i<4; i++) {
+        res->v[face_v[i]] = res->v[opposite_face_v[i]] = base->v[face_v[i]];
+    }
+
+    uint8_t axis_idx;
+    switch (face) {
+        case LEFT_FACE:
+            separation = -separation;
+        case RIGHT_FACE:
+            axis_idx = 0;
+            break;
+
+        case DOWN_FACE:
+            separation = -separation;
+        case UP_FACE:
+            axis_idx = 1;
+            break;
+
+        case BACK_FACE:
+            separation = -separation;
+        case FRONT_FACE:
+            axis_idx = 2;
+            break;
+    }
+
+    for (i=0; i<4; i++) {
+        res->v[face_v[i]].E[axis_idx] += separation;
+    }
+}
+
+struct closet_t new_closet (vec3f dim)
+{
+    struct closet_t res = {0};
+    res.size_holes = NUM_HOLES;
+    res.holes = mem_pool_push_size (&res.pool,
+                                    NUM_HOLES*sizeof(struct cuboid_t));
+
+    res.size_separators = NUM_SEPARATORS;
+    res.separators = mem_pool_push_size (&res.pool,
+                                         NUM_SEPARATORS*sizeof(struct cuboid_t));
+    compute_hole_first (dim, &res.holes[0]);
+    res.num_holes++;
+
+    struct cuboid_t base = res.holes[0];
+
+    compute_separator (&base, UP_FACE, DEFAULT_SEPARATION, &res.separators[0]);
+    compute_separator (&base, DOWN_FACE, DEFAULT_SEPARATION, &res.separators[1]);
+    compute_separator (&base, RIGHT_FACE, DEFAULT_SEPARATION, &res.separators[2]);
+    compute_separator (&base, LEFT_FACE, DEFAULT_SEPARATION, &res.separators[3]);
+    compute_separator (&base, FRONT_FACE, DEFAULT_SEPARATION, &res.separators[4]);
+    compute_separator (&base, BACK_FACE, DEFAULT_SEPARATION, &res.separators[5]);
+
+    res.num_seps += 6;
+
+    return res;
+}
+
+struct closet_scene_t init_closet_scene ()
 {
     struct closet_scene_t scene = {0};
-
-    scene.num_holes = num_holes;
-    scene.cl.holes = mem_pool_push_size (&scene.cl.pool,
-                                         num_holes*sizeof(struct cuboid_t));
-    scene.num_seps = num_seps;
-    scene.cl.separators = mem_pool_push_size (&scene.cl.pool,
-                                              num_seps*sizeof(struct cuboid_t));
 
     scene.program_id = gl_program ("vertex_shader.glsl", "fragment_shader.glsl");
     if (!scene.program_id) {
@@ -739,11 +858,12 @@ struct closet_scene_t init_closet_scene (float num_holes, float num_seps)
 void update_closet_scene (struct closet_scene_t *scene, struct closet_t *cl)
 {
     mem_pool_t pool = {0};
-    float *vertices = mem_pool_push_size (&pool, VA_CUBOID_SIZE*scene->num_holes);
+    float *vertices = mem_pool_push_size (&pool, VA_CUBOID_SIZE*cl->num_holes);
     float *vert_ptr = vertices;
     int i;
-    for (i = 0; i<scene->num_holes; i++) {
+    for (i = 0; i<cl->num_holes; i++) {
         vert_ptr = put_cuboid_in_vertex_array (&cl->holes[i], vert_ptr);
+        scene->holes_vao_size += 36;
     }
 
     GLint pos_attr = glGetAttribLocation (scene->program_id, "position");
@@ -754,7 +874,7 @@ void update_closet_scene (struct closet_scene_t *scene, struct closet_t *cl)
       GLuint vbo;
       glGenBuffers (1, &vbo);
       glBindBuffer (GL_ARRAY_BUFFER, vbo);
-      glBufferData (GL_ARRAY_BUFFER, VA_CUBOID_SIZE*scene->num_holes, vertices, GL_STATIC_DRAW);
+      glBufferData (GL_ARRAY_BUFFER, VA_CUBOID_SIZE*cl->num_holes, vertices, GL_STATIC_DRAW);
 
       glEnableVertexAttribArray (pos_attr);
       glVertexAttribPointer (pos_attr, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), 0);
@@ -762,17 +882,18 @@ void update_closet_scene (struct closet_scene_t *scene, struct closet_t *cl)
       glEnableVertexAttribArray (normal_attr);
       glVertexAttribPointer (normal_attr, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), (void*)(3*sizeof(float)));
 
-    vertices = mem_pool_push_size (&pool, VA_CUBOID_SIZE*scene->num_seps);
+    vertices = mem_pool_push_size (&pool, VA_CUBOID_SIZE*cl->num_seps);
     vert_ptr = vertices;
-    for (i = 0; i<scene->num_seps; i++) {
+    for (i = 0; i<cl->num_seps; i++) {
         vert_ptr = put_cuboid_in_vertex_array (&cl->separators[i], vert_ptr);
+        scene->seps_vao_size += 36;
     }
 
     glBindVertexArray (scene->seps_vao);
 
       glGenBuffers (1, &vbo);
       glBindBuffer (GL_ARRAY_BUFFER, vbo);
-      glBufferData (GL_ARRAY_BUFFER, VA_CUBOID_SIZE*scene->num_seps, vertices, GL_STATIC_DRAW);
+      glBufferData (GL_ARRAY_BUFFER, VA_CUBOID_SIZE*cl->num_seps, vertices, GL_STATIC_DRAW);
 
       glEnableVertexAttribArray (pos_attr);
       glVertexAttribPointer (pos_attr, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), 0);
@@ -809,13 +930,13 @@ void render_closet (struct closet_scene_t *closet_scene, struct camera_t *camera
     // Render holes
     glBindVertexArray (closet_scene->holes_vao);
     glUniform4f (closet_scene->color_loc, 1, 1, 1, 1);
-    glDrawArrays (GL_TRIANGLES, 0, 36*closet_scene->num_holes);
+    glDrawArrays (GL_TRIANGLES, 0, closet_scene->holes_vao_size);
 
     // Render separators
     glBindVertexArray (closet_scene->seps_vao);
     glDepthMask (GL_FALSE);
-    glUniform4f (closet_scene->color_loc, 1, 1, 0, 0.4);
-    glDrawArrays (GL_TRIANGLES, 0, 36*closet_scene->num_seps);
+    glUniform4f (closet_scene->color_loc, 1, 1, 0, 0.7);
+    glDrawArrays (GL_TRIANGLES, 0, closet_scene->seps_vao_size);
     glDepthMask (GL_TRUE);
 }
 
@@ -851,27 +972,23 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     if (!run_once) {
         run_once = true;
 
-        closet_scene = init_closet_scene (3, 1);
+        closet_scene = init_closet_scene ();
         if (closet_scene.program_id == 0) {
             st->end_execution = true;
             return blit_needed;
         }
 
         float separation = 0.025;
-        struct closet_t *cl = &closet_scene.cl;
         vec3f dim = VEC3F (0.9, 0.4, 0.7);
-        compute_hole_first (dim, &cl->holes[0]);
+        struct closet_t cl = new_closet (dim);
 
         dim = VEC3F (0.8, 0.4, 0.7);
-        compute_hole (dim, &cl->holes[0], UP_FACE, RUF, separation, &cl->holes[1]);
+        push_hole (&cl, dim, 0, UP_FACE, RUF, separation);
 
         dim = VEC3F (0.3, 0.6, 0.7);
-        compute_hole (dim, &cl->holes[1], RIGHT_FACE, RUF, separation, &cl->holes[2]);
+        push_hole (&cl, dim, 1, RIGHT_FACE, RUF, separation);
 
-        dim = VEC3F (0.8, 0.4, 0.7);
-        compute_hole (dim, &cl->holes[0], DOWN_FACE, RUF, separation, &cl->separators[0]);
-
-        update_closet_scene (&closet_scene, cl);
+        update_closet_scene (&closet_scene, &cl);
 
         main_camera.near_plane = 0.1;
         main_camera.far_plane = 100;
