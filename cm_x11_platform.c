@@ -479,6 +479,16 @@ enum faces_t {
     BACK_FACE   // -Z
 };
 
+static inline
+enum faces_t opposite_face (enum faces_t face)
+{
+    if (face % 2 == 0) {
+        return face + 1;
+    } else {
+        return face - 1;
+    }
+}
+
 // NOTE: Naming is based on the first letter of the 3 faces that contain the
 // vertex in XYZ order.
 // NOTE: Ordering is lexicographic assuming it's a unit cube with LDB point
@@ -542,6 +552,54 @@ float cuboid_face_coord (struct cuboid_t c, enum faces_t face)
     return res;
 }
 
+static inline
+void face_vert_ids (enum faces_t face, uint8_t *face_ids, uint8_t *opposite_face_ids)
+{
+    uint8_t mask;
+    uint8_t axis_1_cnt = 0;
+    uint8_t *axis_1 = face_ids;
+    uint8_t axis_0_cnt = 0;
+    uint8_t *axis_0 = opposite_face_ids;
+
+    switch (face) {
+        case LEFT_FACE:
+            axis_0 = face_ids;
+            axis_1 = opposite_face_ids;
+        case RIGHT_FACE:
+            mask = 0x4;
+            break;
+
+        case DOWN_FACE:
+            axis_0 = face_ids;
+            axis_1 = opposite_face_ids;
+        case UP_FACE:
+            mask = 0x2;
+            break;
+
+        case BACK_FACE:
+            axis_0 = face_ids;
+            axis_1 = opposite_face_ids;
+        case FRONT_FACE:
+            mask = 0x1;
+            break;
+    }
+
+    uint8_t i;
+    for (i=0; i<8; i++) {
+        if (i & mask) {
+            if (axis_1 != NULL) {
+                axis_1[axis_1_cnt] = i;
+                axis_1_cnt++;
+            }
+        } else {
+            if (axis_0 != NULL) {
+                axis_0[axis_0_cnt] = i;
+                axis_0_cnt++;
+            }
+        }
+    }
+}
+
 #define UNIT_CUBE (struct cuboid_t){{\
                     VEC3F(-1,-1,-1), \
                     VEC3F(-1,-1, 1), \
@@ -555,6 +613,7 @@ float cuboid_face_coord (struct cuboid_t c, enum faces_t face)
 
 #define NUM_HOLES 30
 #define NUM_SEPARATORS (5*NUM_HOLES)
+#define NUM_SEPARATOR_PARTS (23*NUM_HOLES)
 #define DEFAULT_SEPARATION 0.025f
 
 struct relative_dimension_t {
@@ -602,16 +661,27 @@ struct hole_dimensions_t {
 static inline
 vec3f hole_dim_direct_to_vec3f (struct hole_dimensions_t *dim)
 {
-    return VEC3F (dim->x.val, dim->y.val, dim->z.val );
+    return VEC3F (dim->x.val, dim->y.val, dim->z.val);
 }
 
+struct separator_part_t {
+    struct cuboid_t c;
+    vec3f color;
+};
+
+struct sep_part_list_t {
+    struct sep_part_list_t *next;
+    struct separator_part_t *part;
+};
+
 struct separator_t {
-    struct cuboid_t s;
+    struct sep_part_list_t *parts;
+    float thickness;
 };
 
 struct hole_t {
     struct cuboid_t h;
-    struct cuboid_t *separators[6];
+    struct separator_t *separators[6];
 };
 
 struct closet_t {
@@ -624,6 +694,10 @@ struct closet_t {
     uint32_t num_seps;
     uint32_t size_separators;
     struct separator_t *separators;
+
+    uint32_t num_sep_parts;
+    uint32_t size_sep_parts;
+    struct separator_part_t *sep_parts;
 };
 
 struct closet_scene_t {
@@ -735,6 +809,123 @@ void compute_cuboid (vec3f dim,
     }
 }
 
+struct separator_part_t* next_sep_part (struct closet_t *cl)
+{
+    assert (cl->num_sep_parts < cl->size_sep_parts - 1);
+    return &cl->sep_parts[cl->num_sep_parts++];
+}
+
+struct separator_t* next_separator (struct closet_t *cl)
+{
+    assert (cl->num_seps < cl->size_separators - 1);
+    return &cl->separators[cl->num_seps++];
+}
+
+struct hole_t* next_hole (struct closet_t *cl)
+{
+    assert (cl->num_holes < cl->size_holes - 1);
+    return &cl->holes[cl->num_holes++];
+}
+
+void compute_face_separator_part (struct cuboid_t *base, enum faces_t face,
+                                  struct cuboid_t *res, float thickness)
+{
+    uint8_t face_v[4];
+    uint8_t opposite_face_v[4];
+    face_vert_ids (face, face_v, opposite_face_v);
+
+    int i;
+    for (i=0; i<4; i++) {
+        res->v[face_v[i]] = res->v[opposite_face_v[i]] = base->v[face_v[i]];
+    }
+
+    uint8_t axis_idx;
+    switch (face) {
+        case LEFT_FACE:
+            thickness = -thickness;
+        case RIGHT_FACE:
+            axis_idx = 0;
+            break;
+
+        case DOWN_FACE:
+            thickness = -thickness;
+        case UP_FACE:
+            axis_idx = 1;
+            break;
+
+        case BACK_FACE:
+            thickness = -thickness;
+        case FRONT_FACE:
+            axis_idx = 2;
+            break;
+    }
+
+    for (i=0; i<4; i++) {
+        res->v[face_v[i]].E[axis_idx] += thickness;
+    }
+}
+
+void set_new_separator (struct closet_t *cl, struct hole_t *hole, enum faces_t face, float thickness)
+{
+    struct separator_t *new_sep = next_separator (cl);
+    new_sep->thickness = thickness;
+    hole->separators[face] = new_sep;
+
+    struct separator_part_t *part = next_sep_part (cl);
+    struct cuboid_t *base = &hole->h;
+    compute_face_separator_part (base, face, &part->c, thickness);
+
+    struct sep_part_list_t *list_node = mem_pool_push_size (&cl->pool, sizeof(struct sep_part_list_t));
+    new_sep->parts = list_node;
+    list_node->part = part;
+    list_node->next = NULL;
+}
+
+void extend_separator (struct closet_t *cl, struct hole_t *hole, enum faces_t face, struct separator_t *sep)
+{
+    struct separator_part_t *part = next_sep_part (cl);
+    compute_face_separator_part (&hole->h, face, &part->c, sep->thickness);
+    hole->separators[face] = sep;
+
+    struct sep_part_list_t *list_node = mem_pool_push_size (&cl->pool, sizeof(struct sep_part_list_t));
+    list_node->part = part;
+    list_node->next = sep->parts;
+    sep->parts = list_node;
+}
+
+struct closet_t new_closet (struct hole_dimensions_t *dim)
+{
+    assert (dim->x.type == DIMENSION_DIRECT &&
+            dim->y.type == DIMENSION_DIRECT &&
+            dim->z.type == DIMENSION_DIRECT);
+
+    struct closet_t res = {0};
+    res.size_holes = NUM_HOLES;
+    res.holes = mem_pool_push_size (&res.pool,
+                                    NUM_HOLES*sizeof(struct hole_t));
+
+    res.size_separators = NUM_SEPARATORS;
+    res.separators = mem_pool_push_size (&res.pool,
+                                         NUM_SEPARATORS*sizeof(struct separator_t));
+
+    res.size_sep_parts = NUM_SEPARATOR_PARTS;
+    res.sep_parts = mem_pool_push_size (&res.pool,
+                                         NUM_SEPARATOR_PARTS*sizeof(struct separator_part_t));
+
+    vec3f hole_size = hole_dim_direct_to_vec3f (dim);
+    struct hole_t *new_hole = next_hole (&res);
+    compute_hole_first (hole_size, &new_hole->h);
+
+    set_new_separator (&res, new_hole, UP_FACE, DEFAULT_SEPARATION);
+    set_new_separator (&res, new_hole, DOWN_FACE, DEFAULT_SEPARATION);
+    set_new_separator (&res, new_hole, RIGHT_FACE, DEFAULT_SEPARATION);
+    set_new_separator (&res, new_hole, LEFT_FACE, DEFAULT_SEPARATION);
+    set_new_separator (&res, new_hole, FRONT_FACE, DEFAULT_SEPARATION);
+    set_new_separator (&res, new_hole, BACK_FACE, DEFAULT_SEPARATION);
+
+    return res;
+}
+
 void push_hole (struct closet_t *cl,
                 struct hole_dimensions_t *dim, uint32_t base_id,
                 enum faces_t face, enum cube_vertices_t base_anchor_id,
@@ -771,7 +962,7 @@ void push_hole (struct closet_t *cl,
     }
 
     // Compute the position and id for the anchor vertex in the new cuboid
-    uint8_t anchor_id = base_anchor_id;
+    enum cube_vertices_t anchor_id = base_anchor_id;
     vec3f anchor_pos;
     {
         anchor_pos = base_hole_cuboid->v[anchor_id];
@@ -818,8 +1009,8 @@ void push_hole (struct closet_t *cl,
 
     // Compute the size of the new hole
     vec3f dim_vec = VEC3F(0,0,0);
+    enum cube_vertices_t moving_vertex_id = anchor_id^0x7;
     {
-        uint8_t moving_vertex_id = anchor_id^0x7;
 
         switch (dim->x.type) {
             case DIMENSION_DIRECT:
@@ -886,119 +1077,93 @@ void push_hole (struct closet_t *cl,
         }
     }
 
-    compute_cuboid (dim_vec, anchor_id, anchor_pos, &cl->holes[cl->num_holes].h);
-    cl->num_holes++;
-}
+    // Compute new hole
+    struct hole_t *new_hole = next_hole (cl);
+    compute_cuboid (dim_vec, anchor_id, anchor_pos, &new_hole->h);
 
-void set_new_separator (struct closet_t *cl, uint32_t hole_id, enum faces_t face, float separation)
-{
-    uint8_t face_v[4];
-    uint8_t opposite_face_v[4];
+    // Resolve separators
+    struct hole_t *base_hole = &cl->holes[base_id];
+    new_hole->separators[opposite_face (face)] = base_hole->separators[face];
 
-    {
-        uint8_t mask;
-        uint8_t axis_1_cnt = 0;
-        uint8_t *axis_1 = face_v;
-        uint8_t axis_0_cnt = 0;
-        uint8_t *axis_0 = opposite_face_v;
+    if (VERT_FACE_X(anchor_id) != opposite_face (face)) {
+        extend_separator (cl, new_hole, VERT_FACE_X(anchor_id), base_hole->separators[VERT_FACE_X(anchor_id)]);
+    }
 
-        switch (face) {
-            case LEFT_FACE:
-                axis_0 = face_v;
-                axis_1 = opposite_face_v;
-            case RIGHT_FACE:
-                mask = 0x4;
+    if (VERT_FACE_Y(anchor_id) != opposite_face (face)) {
+        extend_separator (cl, new_hole, VERT_FACE_Y(anchor_id), base_hole->separators[VERT_FACE_Y(anchor_id)]);
+    }
+
+    if (VERT_FACE_Z(anchor_id) != opposite_face (face)) {
+        extend_separator (cl, new_hole, VERT_FACE_Z(anchor_id), base_hole->separators[VERT_FACE_Z(anchor_id)]);
+    }
+
+    if (VERT_FACE_X(moving_vertex_id) != face) {
+        switch (dim->x.type) {
+            case DIMENSION_DIRECT:
+                set_new_separator (cl, new_hole, VERT_FACE_X(moving_vertex_id), DEFAULT_SEPARATION);
                 break;
-
-            case DOWN_FACE:
-                axis_0 = face_v;
-                axis_1 = opposite_face_v;
-            case UP_FACE:
-                mask = 0x2;
+            case DIMENSION_COPY:
+                extend_separator (cl, new_hole,
+                                  VERT_FACE_X(moving_vertex_id),
+                                  base_hole->separators[VERT_FACE_X(moving_vertex_id)]);
                 break;
-
-            case BACK_FACE:
-                axis_0 = face_v;
-                axis_1 = opposite_face_v;
-            case FRONT_FACE:
-                mask = 0x1;
-                break;
-        }
-
-        uint8_t i;
-        for (i=0; i<8; i++) {
-            if (i & mask) {
-                axis_1[axis_1_cnt] = i;
-                axis_1_cnt++;
-            } else {
-                axis_0[axis_0_cnt] = i;
-                axis_0_cnt++;
-            }
+            case DIMENSION_RELATIVE:
+                {
+                    struct relative_dimension_t rval = dim->x.rval;
+                    struct separator_t *rel_sep = cl->holes[rval.hole_id].separators[rval.face];
+                    extend_separator (cl, new_hole, VERT_FACE_X(moving_vertex_id), rel_sep);
+                } break;
+            default:
+                invalid_code_path;
         }
     }
 
-    struct cuboid_t *new_sep_c = &cl->separators[cl->num_seps].s;
-    cl->num_seps++;
-    cl->holes[hole_id].separators[face] = new_sep_c;
-
-    struct cuboid_t *base = &cl->holes[hole_id].h;
-    int i;
-    for (i=0; i<4; i++) {
-        new_sep_c->v[face_v[i]] = new_sep_c->v[opposite_face_v[i]] = base->v[face_v[i]];
+    if (VERT_FACE_Y(moving_vertex_id) != face) {
+        switch (dim->y.type) {
+            case DIMENSION_DIRECT:
+                set_new_separator (cl, new_hole, VERT_FACE_Y(moving_vertex_id), DEFAULT_SEPARATION);
+                break;
+            case DIMENSION_COPY:
+                extend_separator (cl, new_hole,
+                                  VERT_FACE_Y(moving_vertex_id),
+                                  base_hole->separators[VERT_FACE_Y(moving_vertex_id)]);
+                break;
+            case DIMENSION_RELATIVE:
+                {
+                    struct relative_dimension_t rval = dim->y.rval;
+                    struct separator_t *rel_sep = cl->holes[rval.hole_id].separators[rval.face];
+                    extend_separator (cl, new_hole, VERT_FACE_Y(moving_vertex_id), rel_sep);
+                } break;
+            default:
+                invalid_code_path;
+        }
     }
 
-    uint8_t axis_idx;
-    switch (face) {
-        case LEFT_FACE:
-            separation = -separation;
-        case RIGHT_FACE:
-            axis_idx = 0;
-            break;
-
-        case DOWN_FACE:
-            separation = -separation;
-        case UP_FACE:
-            axis_idx = 1;
-            break;
-
-        case BACK_FACE:
-            separation = -separation;
-        case FRONT_FACE:
-            axis_idx = 2;
-            break;
+    if (VERT_FACE_Z(moving_vertex_id) != face) {
+        switch (dim->z.type) {
+            case DIMENSION_DIRECT:
+                set_new_separator (cl, new_hole, VERT_FACE_Z(moving_vertex_id), DEFAULT_SEPARATION);
+                break;
+            case DIMENSION_COPY:
+                extend_separator (cl, new_hole,
+                                  VERT_FACE_Z(moving_vertex_id),
+                                  base_hole->separators[VERT_FACE_Z(moving_vertex_id)]);
+                break;
+            case DIMENSION_RELATIVE:
+                {
+                    struct relative_dimension_t rval = dim->z.rval;
+                    struct separator_t *rel_sep = cl->holes[rval.hole_id].separators[rval.face];
+                    extend_separator (cl, new_hole, VERT_FACE_Z(moving_vertex_id), rel_sep);
+                } break;
+            default:
+                invalid_code_path;
+        }
     }
 
-    for (i=0; i<4; i++) {
-        new_sep_c->v[face_v[i]].E[axis_idx] += separation;
-    }
-}
-
-struct closet_t new_closet (struct hole_dimensions_t *dim)
-{
-    assert (dim->x.type == DIMENSION_DIRECT &&
-            dim->y.type == DIMENSION_DIRECT &&
-            dim->z.type == DIMENSION_DIRECT);
-
-    struct closet_t res = {0};
-    res.size_holes = NUM_HOLES;
-    res.holes = mem_pool_push_size (&res.pool,
-                                    NUM_HOLES*sizeof(struct hole_t));
-
-    res.size_separators = NUM_SEPARATORS;
-    res.separators = mem_pool_push_size (&res.pool,
-                                         NUM_SEPARATORS*sizeof(struct separator_t));
-    vec3f hole_size = hole_dim_direct_to_vec3f (dim);
-    compute_hole_first (hole_size, &res.holes[0].h);
-    res.num_holes++;
-
-    set_new_separator (&res, 0, UP_FACE, DEFAULT_SEPARATION);
-    set_new_separator (&res, 0, DOWN_FACE, DEFAULT_SEPARATION);
-    set_new_separator (&res, 0, RIGHT_FACE, DEFAULT_SEPARATION);
-    set_new_separator (&res, 0, LEFT_FACE, DEFAULT_SEPARATION);
-    set_new_separator (&res, 0, FRONT_FACE, DEFAULT_SEPARATION);
-    set_new_separator (&res, 0, BACK_FACE, DEFAULT_SEPARATION);
-
-    return res;
+    // TODO: What happens if the distance between the faces of new_hole parallel
+    // to face was set using relative dimensioning? Then the separator may
+    // already exist, in which case we want to use extend_separator() here.
+    set_new_separator (cl, new_hole, face, DEFAULT_SEPARATION);
 }
 
 struct closet_scene_t init_closet_scene ()
@@ -1048,10 +1213,10 @@ void update_closet_scene (struct closet_scene_t *scene, struct closet_t *cl)
       glEnableVertexAttribArray (normal_attr);
       glVertexAttribPointer (normal_attr, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), (void*)(3*sizeof(float)));
 
-    vertices = mem_pool_push_size (&pool, VA_CUBOID_SIZE*cl->num_seps);
+    vertices = mem_pool_push_size (&pool, VA_CUBOID_SIZE*cl->num_sep_parts);
     vert_ptr = vertices;
-    for (i = 0; i<cl->num_seps; i++) {
-        vert_ptr = put_cuboid_in_vertex_array (&cl->separators[i].s, vert_ptr);
+    for (i = 0; i<cl->num_sep_parts; i++) {
+        vert_ptr = put_cuboid_in_vertex_array (&cl->sep_parts[i].c, vert_ptr);
         scene->seps_vao_size += 36;
     }
 
@@ -1059,7 +1224,7 @@ void update_closet_scene (struct closet_scene_t *scene, struct closet_t *cl)
 
       glGenBuffers (1, &vbo);
       glBindBuffer (GL_ARRAY_BUFFER, vbo);
-      glBufferData (GL_ARRAY_BUFFER, VA_CUBOID_SIZE*cl->num_seps, vertices, GL_STATIC_DRAW);
+      glBufferData (GL_ARRAY_BUFFER, VA_CUBOID_SIZE*cl->num_sep_parts, vertices, GL_STATIC_DRAW);
 
       glEnableVertexAttribArray (pos_attr);
       glVertexAttribPointer (pos_attr, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), 0);
