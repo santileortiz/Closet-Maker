@@ -605,16 +605,25 @@ vec3f hole_dim_direct_to_vec3f (struct hole_dimensions_t *dim)
     return VEC3F (dim->x.val, dim->y.val, dim->z.val );
 }
 
+struct separator_t {
+    struct cuboid_t s;
+};
+
+struct hole_t {
+    struct cuboid_t h;
+    struct cuboid_t *separators[6];
+};
+
 struct closet_t {
     mem_pool_t pool;
 
     uint32_t num_holes;
     uint32_t size_holes;
-    struct cuboid_t *holes;
+    struct hole_t *holes;
 
     uint32_t num_seps;
     uint32_t size_separators;
-    struct cuboid_t *separators;
+    struct separator_t *separators;
 };
 
 struct closet_scene_t {
@@ -736,6 +745,8 @@ void push_hole (struct closet_t *cl,
     // TODO: Grow the hole array instead of failing
     assert (cl->num_holes < cl->size_holes - 1);
 
+    struct cuboid_t *base_hole_cuboid = &cl->holes[base_id].h;
+
     // Ensure the base_anchor_id is in the face received as argument. If it's
     // not we choose the closest vertex that is in it.
     switch (face) {
@@ -763,7 +774,7 @@ void push_hole (struct closet_t *cl,
     uint8_t anchor_id = base_anchor_id;
     vec3f anchor_pos;
     {
-        anchor_pos = cl->holes[base_id].v[anchor_id];
+        anchor_pos = base_hole_cuboid->v[anchor_id];
         switch (face) {
             case RIGHT_FACE:
                 anchor_pos.x += separation;
@@ -815,13 +826,14 @@ void push_hole (struct closet_t *cl,
                 dim_vec.x = dim->x.val;
                 break;
             case DIMENSION_COPY:
-                dim_vec.x = CUBOID_SIZE_X (cl->holes[base_id]);
+                dim_vec.x = CUBOID_SIZE_X (*base_hole_cuboid);
                 break;
             case DIMENSION_RELATIVE:
                 {
                     struct relative_dimension_t rval = dim->x.rval;
                     if (VERT_FACE_X(moving_vertex_id) == rval.face) {
-                        dim_vec.x = fabs (anchor_pos.x - cuboid_face_coord (cl->holes[rval.hole_id], rval.face));
+                        float face_coord = cuboid_face_coord (cl->holes[rval.hole_id].h, rval.face);
+                        dim_vec.x = fabs (anchor_pos.x - face_coord);
                     } else {
                         printf ("Invalid face for relative dimension.\n");
                     }
@@ -836,13 +848,14 @@ void push_hole (struct closet_t *cl,
                 dim_vec.y = dim->y.val;
                 break;
             case DIMENSION_COPY:
-                dim_vec.y = CUBOID_SIZE_Y (cl->holes[base_id]);
+                dim_vec.y = CUBOID_SIZE_Y (*base_hole_cuboid);
                 break;
             case DIMENSION_RELATIVE:
                 {
                     struct relative_dimension_t rval = dim->y.rval;
                     if (VERT_FACE_Y(moving_vertex_id) == rval.face) {
-                        dim_vec.y = fabs (anchor_pos.y - cuboid_face_coord (cl->holes[rval.hole_id], rval.face));
+                        float face_coord = cuboid_face_coord (cl->holes[rval.hole_id].h, rval.face);
+                        dim_vec.y = fabs (anchor_pos.y - face_coord);
                     } else {
                         printf ("Invalid face for relative dimension.\n");
                     }
@@ -856,13 +869,14 @@ void push_hole (struct closet_t *cl,
                 dim_vec.z = dim->z.val;
                 break;
             case DIMENSION_COPY:
-                dim_vec.z = CUBOID_SIZE_Z (cl->holes[base_id]);
+                dim_vec.z = CUBOID_SIZE_Z (*base_hole_cuboid);
                 break;
             case DIMENSION_RELATIVE:
                 {
                     struct relative_dimension_t rval = dim->z.rval;
                     if (VERT_FACE_Z(moving_vertex_id) == rval.face) {
-                        dim_vec.z = fabs (anchor_pos.z - cuboid_face_coord (cl->holes[rval.hole_id], rval.face));
+                        float face_coord = cuboid_face_coord (cl->holes[rval.hole_id].h, rval.face);
+                        dim_vec.z = fabs (anchor_pos.z - face_coord);
                     } else {
                         printf ("Invalid face for relative dimension.\n");
                     }
@@ -872,11 +886,11 @@ void push_hole (struct closet_t *cl,
         }
     }
 
-    compute_cuboid (dim_vec, anchor_id, anchor_pos, &cl->holes[cl->num_holes]);
+    compute_cuboid (dim_vec, anchor_id, anchor_pos, &cl->holes[cl->num_holes].h);
     cl->num_holes++;
 }
 
-void compute_separator (struct cuboid_t *base, enum faces_t face, float separation, struct cuboid_t *res)
+void set_new_separator (struct closet_t *cl, uint32_t hole_id, enum faces_t face, float separation)
 {
     uint8_t face_v[4];
     uint8_t opposite_face_v[4];
@@ -923,9 +937,14 @@ void compute_separator (struct cuboid_t *base, enum faces_t face, float separati
         }
     }
 
+    struct cuboid_t *new_sep_c = &cl->separators[cl->num_seps].s;
+    cl->num_seps++;
+    cl->holes[hole_id].separators[face] = new_sep_c;
+
+    struct cuboid_t *base = &cl->holes[hole_id].h;
     int i;
     for (i=0; i<4; i++) {
-        res->v[face_v[i]] = res->v[opposite_face_v[i]] = base->v[face_v[i]];
+        new_sep_c->v[face_v[i]] = new_sep_c->v[opposite_face_v[i]] = base->v[face_v[i]];
     }
 
     uint8_t axis_idx;
@@ -950,7 +969,7 @@ void compute_separator (struct cuboid_t *base, enum faces_t face, float separati
     }
 
     for (i=0; i<4; i++) {
-        res->v[face_v[i]].E[axis_idx] += separation;
+        new_sep_c->v[face_v[i]].E[axis_idx] += separation;
     }
 }
 
@@ -963,25 +982,21 @@ struct closet_t new_closet (struct hole_dimensions_t *dim)
     struct closet_t res = {0};
     res.size_holes = NUM_HOLES;
     res.holes = mem_pool_push_size (&res.pool,
-                                    NUM_HOLES*sizeof(struct cuboid_t));
+                                    NUM_HOLES*sizeof(struct hole_t));
 
     res.size_separators = NUM_SEPARATORS;
     res.separators = mem_pool_push_size (&res.pool,
-                                         NUM_SEPARATORS*sizeof(struct cuboid_t));
+                                         NUM_SEPARATORS*sizeof(struct separator_t));
     vec3f hole_size = hole_dim_direct_to_vec3f (dim);
-    compute_hole_first (hole_size, &res.holes[0]);
+    compute_hole_first (hole_size, &res.holes[0].h);
     res.num_holes++;
 
-    struct cuboid_t base = res.holes[0];
-
-    compute_separator (&base, UP_FACE, DEFAULT_SEPARATION, &res.separators[0]);
-    compute_separator (&base, DOWN_FACE, DEFAULT_SEPARATION, &res.separators[1]);
-    compute_separator (&base, RIGHT_FACE, DEFAULT_SEPARATION, &res.separators[2]);
-    compute_separator (&base, LEFT_FACE, DEFAULT_SEPARATION, &res.separators[3]);
-    compute_separator (&base, FRONT_FACE, DEFAULT_SEPARATION, &res.separators[4]);
-    compute_separator (&base, BACK_FACE, DEFAULT_SEPARATION, &res.separators[5]);
-
-    res.num_seps += 6;
+    set_new_separator (&res, 0, UP_FACE, DEFAULT_SEPARATION);
+    set_new_separator (&res, 0, DOWN_FACE, DEFAULT_SEPARATION);
+    set_new_separator (&res, 0, RIGHT_FACE, DEFAULT_SEPARATION);
+    set_new_separator (&res, 0, LEFT_FACE, DEFAULT_SEPARATION);
+    set_new_separator (&res, 0, FRONT_FACE, DEFAULT_SEPARATION);
+    set_new_separator (&res, 0, BACK_FACE, DEFAULT_SEPARATION);
 
     return res;
 }
@@ -1013,7 +1028,7 @@ void update_closet_scene (struct closet_scene_t *scene, struct closet_t *cl)
     float *vert_ptr = vertices;
     int i;
     for (i = 0; i<cl->num_holes; i++) {
-        vert_ptr = put_cuboid_in_vertex_array (&cl->holes[i], vert_ptr);
+        vert_ptr = put_cuboid_in_vertex_array (&cl->holes[i].h, vert_ptr);
         scene->holes_vao_size += 36;
     }
 
@@ -1036,7 +1051,7 @@ void update_closet_scene (struct closet_scene_t *scene, struct closet_t *cl)
     vertices = mem_pool_push_size (&pool, VA_CUBOID_SIZE*cl->num_seps);
     vert_ptr = vertices;
     for (i = 0; i<cl->num_seps; i++) {
-        vert_ptr = put_cuboid_in_vertex_array (&cl->separators[i], vert_ptr);
+        vert_ptr = put_cuboid_in_vertex_array (&cl->separators[i].s, vert_ptr);
         scene->seps_vao_size += 36;
     }
 
