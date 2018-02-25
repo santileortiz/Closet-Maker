@@ -427,7 +427,6 @@ void draw_into_window (app_graphics_t *graphics)
 struct quad_renderer_t {
     GLuint vao;
     GLuint program_id;
-    GLuint transf_loc;
 };
 
 static inline
@@ -530,6 +529,9 @@ mat4f transform_from_2_points (vect3_t s1, vect3_t s2, vect3_t d1, vect3_t d2)
     return res;
 }
 
+// Sets the square (in texture coordinates) from the texture with which to fill
+// the quad rendered by quad_prog.
+//
 // TODO: Check this is pixel accurate if we care about pixel perfect texture
 // blitting. For example a when blending texture drawn with cairo.
 void set_texture_clip (struct quad_renderer_t *quad_prog,
@@ -541,6 +543,15 @@ void set_texture_clip (struct quad_renderer_t *quad_prog,
     vect3_t s2 = VECT3(s1.x + 2*width/texture_width, s1.y + 2*height/texture_height, 0);
     mat4f transf = transform_from_2_points (s1, s2, VECT3(-1,-1,0), VECT3(1,1,0));
     glUniformMatrix4fv (glGetUniformLocation (quad_prog->program_id, "transf"), 1, GL_TRUE, transf.E);
+}
+
+// Sets the square (in texture coordinates) from the framebuffer with which to
+// fill the quad rendered by quad_prog.
+void set_framebuffer_clip (struct quad_renderer_t *quad_prog,
+                           struct gl_framebuffer_t *fb,
+                           float x, float y, float width, float height)
+{
+    set_texture_clip (quad_prog, fb->width, fb->height, x, y, width, height);
 }
 
 void blend_premul_quad (struct quad_renderer_t *quad_prog,
@@ -1525,16 +1536,10 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     main_camera.width_m = px_to_m_x (graphics, graphics->width);
     main_camera.height_m = px_to_m_y (graphics, graphics->height);
 
-#if 1
     draw_into_framebuffer_clip (fb, 0, 0, graphics->width, graphics->height);
     render_closet (&closet_scene, &cl, &main_camera);
-    set_texture_clip (&quad_renderer, fb.width, fb.height, 0, 0, graphics->width, graphics->height);
+    set_framebuffer_clip (&quad_renderer, &fb, 0, 0, graphics->width, graphics->height);
     render_framebuffer (&quad_renderer, &fb, false, graphics, 0, 0, graphics->width, graphics->height);
-#else
-    draw_into_full_framebuffer (fb);
-    render_closet (&closet_scene, &cl, &main_camera);
-    render_framebuffer (&quad_renderer, &fb, false, graphics, 0, 0, graphics->width, graphics->height);
-#endif
 
     return true;
 }
