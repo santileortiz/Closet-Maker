@@ -63,7 +63,7 @@ GLuint gl_program (const char *vertex_shader_source, const char *fragment_shader
     GLint shader_status;
     glGetShaderiv (vertex_shader, GL_COMPILE_STATUS, &shader_status);
     if (shader_status != GL_TRUE) {
-        printf ("Vertex shader compilation failed.\n");
+        printf ("Compilation of \"%s\" failed.\n", vertex_shader_source);
         char buffer[512];
         glGetShaderInfoLog(vertex_shader, 512, NULL, buffer);
         printf ("%s\n", buffer);
@@ -78,7 +78,7 @@ GLuint gl_program (const char *vertex_shader_source, const char *fragment_shader
     glCompileShader (fragment_shader);
     glGetShaderiv (fragment_shader, GL_COMPILE_STATUS, &shader_status);
     if (shader_status != GL_TRUE) {
-        printf ("Fragment shader compilation failed.\n");
+        printf ("Compilation of \"%s\" failed.\n", fragment_shader_source);
         char buffer[512];
         glGetShaderInfoLog(vertex_shader, 512, NULL, buffer);
         printf ("%s\n", buffer);
@@ -296,6 +296,7 @@ vect3_t camera_compute_pos (struct camera_t *camera)
 struct gl_framebuffer_t {
     GLuint fb_id;
     GLuint tex_color_buffer;
+    bool multisampled;
     float width;
     float height;
 };
@@ -303,6 +304,7 @@ struct gl_framebuffer_t {
 struct gl_framebuffer_t create_framebuffer (float width, float height)
 {
     struct gl_framebuffer_t framebuffer;
+    framebuffer.multisampled = false;
     framebuffer.width = width;
     framebuffer.height = height;
     glGenFramebuffers (1, &framebuffer.fb_id);
@@ -316,8 +318,10 @@ struct gl_framebuffer_t create_framebuffer (float width, float height)
         width, height, 0,
         GL_RGBA, GL_UNSIGNED_BYTE, NULL
     );
+
     glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
     glFramebufferTexture2D (
         GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
         GL_TEXTURE_2D, framebuffer.tex_color_buffer, 0
@@ -330,6 +334,7 @@ struct gl_framebuffer_t create_framebuffer (float width, float height)
         GL_RENDERBUFFER, GL_DEPTH24_STENCIL8,
         width, height
     );
+
     glFramebufferRenderbuffer (
         GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
         GL_RENDERBUFFER, depth_stencil
@@ -338,12 +343,77 @@ struct gl_framebuffer_t create_framebuffer (float width, float height)
     return framebuffer;
 }
 
+struct gl_framebuffer_t create_multisampled_framebuffer (float width, float height, uint32_t num_samples)
+{
+    struct gl_framebuffer_t framebuffer;
+    framebuffer.multisampled = true;
+    framebuffer.width = width;
+    framebuffer.height = height;
+    glGenFramebuffers (1, &framebuffer.fb_id);
+    glBindFramebuffer (GL_FRAMEBUFFER, framebuffer.fb_id);
+
+    glGenTextures (1, &framebuffer.tex_color_buffer);
+    glBindTexture (GL_TEXTURE_2D_MULTISAMPLE, framebuffer.tex_color_buffer);
+
+    glTexImage2DMultisample (
+        GL_TEXTURE_2D_MULTISAMPLE, num_samples, GL_RGBA,
+        width, height, GL_FALSE
+    );
+
+    glFramebufferTexture2D (
+        GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+        GL_TEXTURE_2D_MULTISAMPLE, framebuffer.tex_color_buffer, 0
+    );
+
+#if 0
+    // Why does this not work?, We get a FRAMEBUFFER_INCOMPLETE_MULTISAMPLE
+    // response from glCheckFramebufferStatus() even though we are using the
+    // same number of samples as the color texture.
+
+    GLuint depth_stencil;
+    glGenRenderbuffers (1, &depth_stencil);
+    glBindRenderbuffer (GL_RENDERBUFFER, depth_stencil);
+    glRenderbufferStorageMultisample (
+        GL_RENDERBUFFER, num_samples, GL_DEPTH24_STENCIL8,
+        width, height
+    );
+
+    glFramebufferRenderbuffer (
+        GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+        GL_RENDERBUFFER, depth_stencil
+    );
+#else
+    GLuint depth_stencil;
+    glGenTextures (1, &depth_stencil);
+    glBindTexture (GL_TEXTURE_2D_MULTISAMPLE, depth_stencil);
+    glTexImage2DMultisample (
+        GL_TEXTURE_2D_MULTISAMPLE, num_samples, GL_DEPTH24_STENCIL8,
+        width, height, GL_FALSE
+    );
+
+    glFramebufferTexture2D (
+        GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+        GL_TEXTURE_2D_MULTISAMPLE, depth_stencil, 0
+    );
+#endif
+    return framebuffer;
+}
+
 static inline
-void draw_into_framebuffer (struct gl_framebuffer_t framebuffer)
+void draw_into_full_framebuffer (struct gl_framebuffer_t framebuffer)
 {
     glBindFramebuffer (GL_FRAMEBUFFER, framebuffer.fb_id);
     glViewport (0, 0, framebuffer.width, framebuffer.height);
     glScissor (0, 0, framebuffer.width, framebuffer.height);
+}
+
+static inline
+void draw_into_framebuffer_clip (struct gl_framebuffer_t framebuffer,
+                                 float x, float y, float width, float height)
+{
+    glBindFramebuffer (GL_FRAMEBUFFER, framebuffer.fb_id);
+    glViewport (x, y, width, height);
+    glScissor (x, y, width, height);
 }
 
 static inline
@@ -354,7 +424,7 @@ void draw_into_window (app_graphics_t *graphics)
     glScissor (0, 0, graphics->width, graphics->height);
 }
 
-struct textured_quad_t {
+struct quad_renderer_t {
     GLuint vao;
     GLuint program_id;
     GLuint transf_loc;
@@ -372,9 +442,9 @@ float px_to_m_y (app_graphics_t *graphics, float y_val_in_px)
     return y_val_in_px / (1000 * (float)graphics->y_dpi);
 }
 
-struct textured_quad_t init_textured_quad_renderer ()
+struct quad_renderer_t init_quad_renderer ()
 {
-    struct textured_quad_t res = {0};
+    struct quad_renderer_t res = {0};
     float quad_v[] = {
        //X  Y  U    V
         -1, 1, 0.0, 1.0,
@@ -410,7 +480,13 @@ struct textured_quad_t init_textured_quad_renderer ()
     GLuint tex_loc = glGetUniformLocation (res.program_id, "tex");
     glUniform1i (tex_loc, 0);
 
-    res.transf_loc = glGetUniformLocation (res.program_id, "transf");
+    mat4f transf = {{
+         1, 0, 0, 0,
+         0, 1, 0, 0,
+         0, 0, 1, 0,
+         0, 0, 0, 1
+    }};
+    glUniformMatrix4fv (glGetUniformLocation (res.program_id, "transf"), 1, GL_TRUE, transf.E);
     return res;
 }
 
@@ -454,20 +530,87 @@ mat4f transform_from_2_points (vect3_t s1, vect3_t s2, vect3_t d1, vect3_t d2)
     return res;
 }
 
-void render_textured_quad (struct textured_quad_t *quad, GLuint texture,
-                           app_graphics_t *graphics,
-                           float x, float y, float width_px, float height_px)
+// TODO: Check this is pixel accurate if we care about pixel perfect texture
+// blitting. For example a when blending texture drawn with cairo.
+void set_texture_clip (struct quad_renderer_t *quad_prog,
+                       float texture_width, float texture_height,
+                       float x, float y, float width, float height)
+{
+    glUseProgram (quad_prog->program_id);
+    vect3_t s1 = VECT3(-1 + 2*x/texture_width, -1 + 2*y/texture_height, 0);
+    vect3_t s2 = VECT3(s1.x + 2*width/texture_width, s1.y + 2*height/texture_height, 0);
+    mat4f transf = transform_from_2_points (s1, s2, VECT3(-1,-1,0), VECT3(1,1,0));
+    glUniformMatrix4fv (glGetUniformLocation (quad_prog->program_id, "transf"), 1, GL_TRUE, transf.E);
+}
+
+void blend_premul_quad (struct quad_renderer_t *quad_prog,
+                        GLuint texture, bool multisampled,
+                        app_graphics_t *graphics,
+                        float x, float y, float width_px, float height_px)
 {
     glBindFramebuffer (GL_FRAMEBUFFER, 0);
-    glBindVertexArray (quad->vao);
-    glUseProgram (quad->program_id);
+    glBindVertexArray (quad_prog->vao);
+    glUseProgram (quad_prog->program_id);
     glDisable (GL_DEPTH_TEST);
     glActiveTexture (GL_TEXTURE0);
-    glBindTexture (GL_TEXTURE_2D, texture);
+
+    if (multisampled) {
+        glBindTexture (GL_TEXTURE_2D_MULTISAMPLE, texture);
+        glUniform1i (glGetUniformLocation (quad_prog->program_id, "texMS"), 0);
+        glUniform1i (glGetUniformLocation (quad_prog->program_id, "multisampled_texture"), 1);
+    } else {
+        glBindTexture (GL_TEXTURE_2D, texture);
+        glUniform1i (glGetUniformLocation (quad_prog->program_id, "tex"), 0);
+        glUniform1i (glGetUniformLocation (quad_prog->program_id, "multisampled_texture"), 0);
+    }
 
     glViewport (x, graphics->height - y - height_px, width_px, height_px);
     glScissor (x, graphics->height - y - height_px, width_px, height_px);
+
+    glUniform1i (glGetUniformLocation (quad_prog->program_id, "ignore_alpha"), 0);
     glDrawArrays (GL_TRIANGLES, 0, 6);
+}
+
+void render_opaque_quad (struct quad_renderer_t *quad_prog,
+                         GLuint texture, bool multisampled,
+                         app_graphics_t *graphics,
+                         float x, float y, float width_px, float height_px)
+{
+    glBindFramebuffer (GL_FRAMEBUFFER, 0);
+    glBindVertexArray (quad_prog->vao);
+    glUseProgram (quad_prog->program_id);
+    glDisable (GL_DEPTH_TEST);
+    glActiveTexture (GL_TEXTURE0);
+
+    if (multisampled) {
+        glBindTexture (GL_TEXTURE_2D_MULTISAMPLE, texture);
+        glUniform1i (glGetUniformLocation (quad_prog->program_id, "texMS"), 0);
+        glUniform1i (glGetUniformLocation (quad_prog->program_id, "multisampled_texture"), 1);
+    } else {
+        glBindTexture (GL_TEXTURE_2D, texture);
+        glUniform1i (glGetUniformLocation (quad_prog->program_id, "tex"), 0);
+        glUniform1i (glGetUniformLocation (quad_prog->program_id, "multisampled_texture"), 0);
+    }
+
+    glViewport (x, graphics->height - y - height_px, width_px, height_px);
+    glScissor (x, graphics->height - y - height_px, width_px, height_px);
+
+    glUniform1i (glGetUniformLocation (quad_prog->program_id, "ignore_alpha"), 1);
+    glDrawArrays (GL_TRIANGLES, 0, 6);
+}
+
+void render_framebuffer (struct quad_renderer_t *quad_prog,
+                         struct gl_framebuffer_t *fb, bool blend,
+                         app_graphics_t *graphics,
+                         float x, float y, float width_px, float height_px)
+{
+    if (blend) {
+        blend_premul_quad (quad_prog, fb->tex_color_buffer, fb->multisampled, graphics,
+                           x, y, width_px, height_px);
+    } else {
+        render_opaque_quad (quad_prog, fb->tex_color_buffer, fb->multisampled, graphics,
+                           x, y, width_px, height_px);
+    }
 }
 
 enum faces_t {
@@ -812,7 +955,9 @@ void compute_cuboid (vec3f dim,
 struct separator_part_t* next_sep_part (struct closet_t *cl)
 {
     assert (cl->num_sep_parts < cl->size_sep_parts - 1);
-    return &cl->sep_parts[cl->num_sep_parts++];
+    struct separator_part_t *res = &cl->sep_parts[cl->num_sep_parts++];
+    res->color = VEC3F (1, 1, 0);
+    return res;
 }
 
 struct separator_t* next_separator (struct closet_t *cl)
@@ -891,6 +1036,17 @@ void extend_separator (struct closet_t *cl, struct hole_t *hole, enum faces_t fa
     list_node->part = part;
     list_node->next = sep->parts;
     sep->parts = list_node;
+}
+
+static inline
+void color_separator (struct separator_t *sep, vec3f color)
+{
+    struct sep_part_list_t *curr_list_node = sep->parts;
+    while (curr_list_node != NULL) {
+        struct separator_part_t *part = curr_list_node->part;
+        part->color = color;
+        curr_list_node = curr_list_node->next;
+    }
 }
 
 struct closet_t new_closet (struct hole_dimensions_t *dim)
@@ -1235,7 +1391,7 @@ void update_closet_scene (struct closet_scene_t *scene, struct closet_t *cl)
     mem_pool_destroy (&pool);
 }
 
-void render_closet (struct closet_scene_t *closet_scene, struct camera_t *camera)
+void render_closet (struct closet_scene_t *closet_scene, struct closet_t *cl, struct camera_t *camera)
 {
     glUseProgram (closet_scene->program_id);
 
@@ -1253,23 +1409,30 @@ void render_closet (struct closet_scene_t *closet_scene, struct camera_t *camera
                                                camera->near_plane, camera->far_plane);
     glUniformMatrix4fv (closet_scene->proj_loc, 1, GL_TRUE, projection.E);
 
-    glClearColor(0.164f, 0.203f, 0.223f, 1.0f);
+    glClearColor(0.164f, 0.203f, 0.223f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+    // Render holes (Opaque objects)
     glEnable (GL_DEPTH_TEST);
-
-    // Render holes
     glBindVertexArray (closet_scene->holes_vao);
     glUniform4f (closet_scene->color_loc, 1, 1, 1, 1);
     glDrawArrays (GL_TRIANGLES, 0, closet_scene->holes_vao_size);
 
-    // Render separators
+    // Render separator parts
     glBindVertexArray (closet_scene->seps_vao);
     glDepthMask (GL_FALSE);
-    glUniform4f (closet_scene->color_loc, 1, 1, 0, 0.7);
-    glDrawArrays (GL_TRIANGLES, 0, closet_scene->seps_vao_size);
+
+    int i;
+    for (i=0; i<cl->num_sep_parts; i++) {
+        vec3f c = cl->sep_parts[i].color;
+        glUniform4f (closet_scene->color_loc, c.r, c.g, c.b, 0.7);
+        glDrawArrays (GL_TRIANGLES, i*36, 36);
+    }
     glDepthMask (GL_TRUE);
 }
+
+vec3f undefined_color = VEC3F (1,1,0);
+vec3f selected_color = VEC3F(0.93,0.5,0.1);
 
 bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_input_t input)
 {
@@ -1285,8 +1448,6 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     switch (st->gui_st.input.keycode) {
         case 24: //KEY_Q
             st->end_execution = true;
-            // NOTE: We want modes to be called once after we end execution
-            // so they can do their own cleanup.
             break;
         default:
             //if (input.keycode >= 8) {
@@ -1297,6 +1458,9 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     }
 
     static struct closet_scene_t closet_scene;
+    static struct quad_renderer_t quad_renderer;
+    static struct gl_framebuffer_t fb;
+    static struct closet_t cl;
     static bool run_once = false;
     static struct camera_t main_camera;
 
@@ -1309,9 +1473,12 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
             return blit_needed;
         }
 
+        fb = create_multisampled_framebuffer (graphics->screen_width, graphics->screen_height, 4);
+        quad_renderer = init_quad_renderer ();
+
         float separation = 0.025;
         struct hole_dimensions_t dim = HOLE_DIM_F (0.9, 0.4, 0.7);
-        struct closet_t cl = new_closet (&dim);
+        cl = new_closet (&dim);
 
         dim = HOLE_DIM (DIM_COPY, DIM_COPY, DIM_COPY);
         push_hole (&cl, &dim, 0, UP_FACE, RUF, separation);
@@ -1320,12 +1487,29 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
         push_hole (&cl, &dim, 1, RIGHT_FACE, RUF, separation);
 
         update_closet_scene (&closet_scene, &cl);
+        color_separator (&cl.separators[0], selected_color);
 
         main_camera.near_plane = 0.1;
         main_camera.far_plane = 100;
         main_camera.pitch = M_PI/4;
         main_camera.yaw = M_PI/4;
         main_camera.distance = 4.5;
+    }
+
+    static int selected_separator = 0;
+    switch (st->gui_st.input.keycode) {
+        case 23: //KEY_TAB
+            color_separator (&cl.separators[selected_separator], undefined_color);
+            selected_separator++;
+            selected_separator = WRAP (selected_separator, 0, cl.num_seps - 1);
+            color_separator (&cl.separators[selected_separator], selected_color);
+            break;
+        case 9: //KEY_ESC
+            color_separator (&cl.separators[selected_separator], undefined_color);
+            selected_separator = -1;
+            break;
+        default:
+            break;
     }
 
     if (st->gui_st.dragging[0]) {
@@ -1341,8 +1525,16 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     main_camera.width_m = px_to_m_x (graphics, graphics->width);
     main_camera.height_m = px_to_m_y (graphics, graphics->height);
 
-    draw_into_window (graphics);
-    render_closet (&closet_scene, &main_camera);
+#if 1
+    draw_into_framebuffer_clip (fb, 0, 0, graphics->width, graphics->height);
+    render_closet (&closet_scene, &cl, &main_camera);
+    set_texture_clip (&quad_renderer, fb.width, fb.height, 0, 0, graphics->width, graphics->height);
+    render_framebuffer (&quad_renderer, &fb, false, graphics, 0, 0, graphics->width, graphics->height);
+#else
+    draw_into_full_framebuffer (fb);
+    render_closet (&closet_scene, &cl, &main_camera);
+    render_framebuffer (&quad_renderer, &fb, false, graphics, 0, 0, graphics->width, graphics->height);
+#endif
 
     return true;
 }
@@ -1922,12 +2114,15 @@ void x11_send_event (xcb_connection_t *c, xcb_drawable_t window, void *event)
     }
 }
 
-void x11_get_screen_dpi (struct x_state *x_st, float *x_dpi, float *y_dpi)
+void x11_get_screen_extents (struct x_state *x_st, float *x_dpi, float *y_dpi,
+                             uint16_t *width, uint16_t *height)
 {
     const xcb_query_extension_reply_t * render_info =
         xcb_get_extension_data (x_st->xcb_c, &xcb_randr_id);
 
     if (!render_info->present) {
+        *width = x_st->screen->width_in_pixels;
+        *height = x_st->screen->height_in_pixels;
         *x_dpi = x_st->screen->width_in_pixels * 25.4 / (float)x_st->screen->width_in_millimeters;
         *y_dpi = x_st->screen->height_in_pixels * 25.4 / (float)x_st->screen->height_in_millimeters;
         printf ("No RANDR extension, computing DPI from X11 screen object. It's probably wrong.\n");
@@ -2002,9 +2197,13 @@ void x11_get_screen_dpi (struct x_state *x_st, float *x_dpi, float *y_dpi)
         }
     }
 
+    *width = crtc_info->width;
+    *height = crtc_info->height;
     *x_dpi = crtc_info->width / (float)output_info->mm_width;
     *y_dpi = crtc_info->height / (float)output_info->mm_height;
 }
+
+typedef GLXContext (*glXCreateContextAttribsARBProc)(Display*, GLXFBConfig, GLXContext, Bool, const int*);
 
 int main (void)
 {
@@ -2098,10 +2297,29 @@ int main (void)
     xcb_map_window (x_st->xcb_c, x_st->window);
 
     /* Set up the GL context */
+    glXCreateContextAttribsARBProc glXCreateContextAttribsARB = 0;
+    glXCreateContextAttribsARB = (glXCreateContextAttribsARBProc)
+        glXGetProcAddressARB( (const GLubyte *) "glXCreateContextAttribsARB" );
+
+    int context_attribs[] = {
+        GLX_CONTEXT_MAJOR_VERSION_ARB, 3,
+        GLX_CONTEXT_MINOR_VERSION_ARB, 2,
+        //GLX_CONTEXT_FLAGS_ARB        , GLX_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB,
+        0
+      };
+
+    GLXContext gl_context = glXCreateContextAttribsARB(
+        x_st->xlib_dpy, framebuffer_config, 0,
+        GL_TRUE, context_attribs
+    );
+
+    // TODO: If we fail to get a 3.2 context fallback to an older version, maybe
+    // using the old API:
+    //GLXContext gl_context =
+    //    glXCreateNewContext(x_st->xlib_dpy, framebuffer_config, GLX_RGBA_TYPE, NULL, GL_TRUE);
+
     GLXWindow glX_window =
         glXCreateWindow(x_st->xlib_dpy, framebuffer_config, x_st->window, NULL);
-    GLXContext gl_context =
-        glXCreateNewContext(x_st->xlib_dpy, framebuffer_config, GLX_RGBA_TYPE, NULL, GL_TRUE);
 
     if(!glXMakeContextCurrent(x_st->xlib_dpy, glX_window, glX_window, gl_context))
     {
@@ -2131,7 +2349,8 @@ int main (void)
     app_graphics_t graphics;
     graphics.width = WINDOW_WIDTH;
     graphics.height = WINDOW_HEIGHT;
-    x11_get_screen_dpi (x_st, &graphics.x_dpi, &graphics.y_dpi);
+    x11_get_screen_extents (x_st, &graphics.x_dpi, &graphics.y_dpi,
+                            &graphics.screen_width, &graphics.screen_height);
     bool force_blit = false;
 
     float frame_rate = 60;

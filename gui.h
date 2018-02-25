@@ -16,8 +16,10 @@
 // plattform we support. Maybe move _width_ and _height_ to app_input_t.
 typedef struct {
     cairo_t *cr;
-    uint16_t width;
-    uint16_t height;
+    uint16_t width;  // Window width in pixels
+    uint16_t height; // Window height in pixels
+    uint16_t screen_width;  // Screen width in pixels
+    uint16_t screen_height; // Screen height in pixels
     float x_dpi;
     float y_dpi;
 } app_graphics_t;
