@@ -667,9 +667,32 @@ struct cuboid_t {
     vec3f v[8];
 };
 
+#define UNIT_CUBE (struct cuboid_t){{\
+                    VEC3F(-1,-1,-1), \
+                    VEC3F(-1,-1, 1), \
+                    VEC3F(-1, 1,-1), \
+                    VEC3F(-1, 1, 1), \
+                    VEC3F( 1,-1,-1), \
+                    VEC3F( 1,-1, 1), \
+                    VEC3F( 1, 1,-1), \
+                    VEC3F( 1, 1, 1), \
+                   }}
+
 #define CUBOID_SIZE_X(c) ((c).v[4].x - (c).v[0].x)
 #define CUBOID_SIZE_Y(c) ((c).v[2].y - (c).v[0].y)
 #define CUBOID_SIZE_Z(c) ((c).v[1].z - (c).v[0].z)
+
+void cuboid_init (vec3f dim, struct cuboid_t *res)
+{
+    *res = UNIT_CUBE;
+
+    int i;
+    for (i=0; i<8; i++) {
+        res->v[i].x = res->v[i].x * dim.x/2;
+        res->v[i].y = res->v[i].y * dim.y/2;
+        res->v[i].z = res->v[i].z * dim.z/2;
+    }
+}
 
 void cuboid_print (struct cuboid_t *cb)
 {
@@ -753,17 +776,6 @@ void face_vert_ids (enum faces_t face, uint8_t *face_ids, uint8_t *opposite_face
         }
     }
 }
-
-#define UNIT_CUBE (struct cuboid_t){{\
-                    VEC3F(-1,-1,-1), \
-                    VEC3F(-1,-1, 1), \
-                    VEC3F(-1, 1,-1), \
-                    VEC3F(-1, 1, 1), \
-                    VEC3F( 1,-1,-1), \
-                    VEC3F( 1,-1, 1), \
-                    VEC3F( 1, 1,-1), \
-                    VEC3F( 1, 1, 1), \
-                   }}
 
 #define NUM_HOLES 30
 #define NUM_SEPARATORS (5*NUM_HOLES)
@@ -1442,9 +1454,87 @@ void render_closet (struct closet_scene_t *closet_scene, struct closet_t *cl, st
     glDepthMask (GL_TRUE);
 }
 
+struct cube_test_scene_t {
+    GLuint program_id;
+    GLuint model_loc;
+    GLuint view_loc;
+    GLuint proj_loc;
+    GLuint color_loc;
+    GLuint alpha_loc;
+
+    uint32_t vao_size;
+    GLuint vao;
+};
+
+struct cube_test_scene_t init_cube_test ()
+{
+    struct cube_test_scene_t scene = {0};
+
+    scene.program_id = gl_program ("vertex_shader.glsl", "test_fragment_shader.glsl");
+    if (!scene.program_id) {
+        return scene;
+    }
+
+    glGenVertexArrays (1, &scene.vao);
+
+    scene.model_loc = glGetUniformLocation (scene.program_id, "model");
+    scene.view_loc = glGetUniformLocation (scene.program_id, "view");
+    scene.proj_loc = glGetUniformLocation (scene.program_id, "proj");
+    scene.color_loc = glGetUniformLocation (scene.program_id, "color");
+
+    float vertices[VA_CUBOID_SIZE];
+    struct cuboid_t cube;
+    cuboid_init (VEC3F (1,1,1), &cube);
+    put_cuboid_in_vertex_array (&cube, vertices);
+
+    glBindVertexArray (scene.vao);
+
+      GLuint vbo;
+      glGenBuffers (1, &vbo);
+      glBindBuffer (GL_ARRAY_BUFFER, vbo);
+      glBufferData (GL_ARRAY_BUFFER, VA_CUBOID_SIZE, vertices, GL_STATIC_DRAW);
+
+      GLuint pos_attr = glGetAttribLocation (scene.program_id, "position");
+      glEnableVertexAttribArray (pos_attr);
+      glVertexAttribPointer (pos_attr, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), 0);
+
+      GLuint normal_attr = glGetAttribLocation (scene.program_id, "in_normal");
+      glEnableVertexAttribArray (normal_attr);
+      glVertexAttribPointer (normal_attr, 3, GL_FLOAT, GL_FALSE, 6*sizeof(float), (void*)(3*sizeof(float)));
+
+    return scene;
+}
+
+void render_cube_test (struct cube_test_scene_t *scene, struct camera_t *camera)
+{
+    glUseProgram (scene->program_id);
+
+    mat4f model = rotation_y (0);
+    glUniformMatrix4fv (scene->model_loc, 1, GL_TRUE, model.E);
+
+    vect3_t camera_pos = camera_compute_pos (camera);
+    mat4f view = look_at (camera_pos,
+                          VECT3(0,0,0),
+                          VECT3(0,1,0));
+    glUniformMatrix4fv (scene->view_loc, 1, GL_TRUE, view.E);
+
+    mat4f projection = perspective_projection (-camera->width_m/2, camera->width_m/2,
+                                               -camera->height_m/2, camera->height_m/2,
+                                               camera->near_plane, camera->far_plane);
+    glUniformMatrix4fv (scene->proj_loc, 1, GL_TRUE, projection.E);
+
+    glClearColor(0.164f, 0.203f, 0.223f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    glEnable (GL_DEPTH_TEST);
+    glBindVertexArray (scene->vao);
+    glDrawArrays (GL_TRIANGLES, 0, 36);
+}
+
 vec3f undefined_color = VEC3F (1,1,0);
 vec3f selected_color = VEC3F(0.93,0.5,0.1);
 
+#if 0
 bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_input_t input)
 {
     bool blit_needed = false;
@@ -1543,6 +1633,69 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
 
     return true;
 }
+#else
+bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_input_t input)
+{
+    bool blit_needed = false;
+    st->gui_st.gr = *graphics;
+    if (!st->is_initialized) {
+        st->end_execution = false;
+        st->is_initialized = true;
+    }
+
+    update_input (&st->gui_st, input);
+
+    switch (st->gui_st.input.keycode) {
+        case 24: //KEY_Q
+            st->end_execution = true;
+            break;
+        default:
+            //if (input.keycode >= 8) {
+            //    printf ("%" PRIu8 "\n", input.keycode);
+            //    //printf ("%" PRIu16 "\n", input.modifiers);
+            //}
+            break;
+    }
+
+    static struct cube_test_scene_t test_scene;
+    static bool run_once = false;
+    static struct camera_t main_camera;
+
+    if (!run_once) {
+        run_once = true;
+
+        test_scene = init_cube_test ();
+        if (test_scene.program_id == 0) {
+            st->end_execution = true;
+            return blit_needed;
+        }
+
+        main_camera.near_plane = 0.1;
+        main_camera.far_plane = 100;
+        main_camera.pitch = M_PI/4;
+        main_camera.yaw = M_PI/4;
+        main_camera.distance = 4.5;
+    }
+
+    if (st->gui_st.dragging[0]) {
+        vect2_t change = st->gui_st.ptr_delta;
+        main_camera.pitch += 0.01 * change.y;
+        main_camera.yaw -= 0.01 * change.x;
+    }
+
+    if (input.wheel != 1) {
+        main_camera.distance -= (input.wheel - 1)*main_camera.distance*0.7;
+    }
+
+    main_camera.width_m = px_to_m_x (graphics, graphics->width);
+    main_camera.height_m = px_to_m_y (graphics, graphics->height);
+
+    draw_into_window (graphics);
+    render_cube_test (&test_scene, &main_camera);
+
+    return true;
+}
+#endif
 
 struct x_state {
     xcb_connection_t *xcb_c;

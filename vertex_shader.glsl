@@ -2,7 +2,7 @@
 in vec3 position;
 in vec3 in_normal;
 
-out vec3 normal;
+flat out vec3 normal;
 
 uniform mat4 model;
 uniform mat4 view;
