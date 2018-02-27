@@ -66,7 +66,7 @@ GLuint gl_program (const char *vertex_shader_source, const char *fragment_shader
         printf ("Compilation of \"%s\" failed.\n", vertex_shader_source);
         char buffer[512];
         glGetShaderInfoLog(vertex_shader, 512, NULL, buffer);
-        printf ("%s\n", buffer);
+        printf ("%s", buffer);
         compilation_failed = true;
     }
 
@@ -80,8 +80,8 @@ GLuint gl_program (const char *vertex_shader_source, const char *fragment_shader
     if (shader_status != GL_TRUE) {
         printf ("Compilation of \"%s\" failed.\n", fragment_shader_source);
         char buffer[512];
-        glGetShaderInfoLog(vertex_shader, 512, NULL, buffer);
-        printf ("%s\n", buffer);
+        glGetShaderInfoLog(fragment_shader, 512, NULL, buffer);
+        printf ("%s", buffer);
         compilation_failed = true;
     }
 
@@ -1499,7 +1499,7 @@ void render_closet_transparent (struct closet_scene_t *closet_scene, struct clos
     int i;
     for (i=0; i<cl->num_sep_parts; i++) {
         vec3f c = cl->sep_parts[i].color;
-        glUniform4f (closet_scene->color_loc, c.r, c.g, c.b, 0.95);
+        glUniform4f (closet_scene->color_loc, c.r, c.g, c.b, 0.8);
         glDrawArrays (GL_TRIANGLES, i*36, 36);
     }
 }
@@ -1580,8 +1580,14 @@ void render_cube_test (struct cube_test_scene_t *scene)
     glDrawArrays (GL_TRIANGLES, 0, 36);
 }
 
-void set_depth_textures (GLuint program_id, GLuint depth_texture, GLuint peel_depth_map)
+void depth_peel_set_shader_slots (GLuint program_id,
+                                  GLuint color_texture, GLuint depth_texture,
+                                  GLuint peel_depth_map, GLuint opaque_depth_map)
 {
+    glFramebufferTexture2D (
+        GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+        GL_TEXTURE_2D_MULTISAMPLE, color_texture, 0
+    );
     glFramebufferTexture2D (
         GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
         GL_TEXTURE_2D_MULTISAMPLE, depth_texture, 0
@@ -1590,6 +1596,10 @@ void set_depth_textures (GLuint program_id, GLuint depth_texture, GLuint peel_de
     glActiveTexture (GL_TEXTURE0);
     glBindTexture (GL_TEXTURE_2D_MULTISAMPLE, peel_depth_map);
     glUniform1i (glGetUniformLocation (program_id, "peel_depth_map"), 0);
+
+    glActiveTexture (GL_TEXTURE1);
+    glBindTexture (GL_TEXTURE_2D_MULTISAMPLE, opaque_depth_map);
+    glUniform1i (glGetUniformLocation (program_id, "opaque_depth_map"), 1);
 }
 
 vec3f undefined_color = VEC3F (1,1,0);
@@ -1627,8 +1637,10 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
 
     static GLuint fb;
     static GLuint color_texture;
+    static GLuint opaque_color_texture;
     static GLuint depth_texture;
     static GLuint peel_depth_map;
+    static GLuint opaque_depth_map;
 
     if (!run_once) {
         run_once = true;
@@ -1646,19 +1658,11 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
         glBindFramebuffer (GL_FRAMEBUFFER, fb);
 
         create_color_texture (&color_texture, width, height, 4);
-
-        glFramebufferTexture2D (
-            GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-            GL_TEXTURE_2D_MULTISAMPLE, color_texture, 0
-        );
+        create_color_texture (&opaque_color_texture, width, height, 4);
 
         create_depth_texture (&peel_depth_map, width, height, 4);
+        create_depth_texture (&opaque_depth_map, width, height, 4);
         create_depth_texture (&depth_texture, width, height, 4);
-
-        glFramebufferTexture2D (
-            GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-            GL_TEXTURE_2D_MULTISAMPLE, depth_texture, 0
-        );
 
         quad_renderer = init_quad_renderer ();
 
@@ -1713,43 +1717,97 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
 
     closet_scene_set_camera (&closet_scene, &main_camera);
 
-    int num_pass = 8;
-
+    glEnable (GL_DEPTH_TEST);
     glEnable (GL_SAMPLE_SHADING);
     glMinSampleShading (1.0);
-    glEnable (GL_DEPTH_TEST);
+
     glBindFramebuffer (GL_FRAMEBUFFER, fb);
     glViewport (0, 0, graphics->width, graphics->height);
     glScissor (0, 0, graphics->width, graphics->height);
 
-    // Clear peel_depth_map
+    // Initial texture contents
+    //
+    // color_texture -> (0,0,0,0)
+    // depth_texture -> 1
+    // opaque_color_texture -> (0,0,0,0)
+    // opaque_depth_map -> 1
+    // peel_depth_map -> 0
+
+    // Init color_texture and depth_texture
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glFramebufferTexture2D (
+        GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+        GL_TEXTURE_2D_MULTISAMPLE, color_texture, 0
+    );
+    glFramebufferTexture2D (
+        GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+        GL_TEXTURE_2D_MULTISAMPLE, depth_texture, 0
+    );
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    // Init opaque_color_texture and opaque_depth_texture
+    glFramebufferTexture2D (
+        GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+        GL_TEXTURE_2D_MULTISAMPLE, opaque_color_texture, 0
+    );
+    glFramebufferTexture2D (
+        GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+        GL_TEXTURE_2D_MULTISAMPLE, opaque_depth_map, 0
+    );
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    // Init peel_depth_map
     glFramebufferTexture2D (
         GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
         GL_TEXTURE_2D_MULTISAMPLE, peel_depth_map, 0
     );
-
     glClearDepth (0);
     glClear (GL_DEPTH_BUFFER_BIT);
     glClearDepth (1);
 
-    set_depth_textures (closet_scene.program_id, depth_texture, peel_depth_map);
+    // Opaque pass fragment shader slot content:
+    //
+    // COLOR BUFFER: opaque_color_texture
+    // DEPTH BUFFER: opaque_depth_map
+    // uniform peel_depth_map: peel_depth_map (0's)
+    // uniform opaque_depth_map: depth_texture (1's)
+    depth_peel_set_shader_slots (closet_scene.program_id,
+                                 opaque_color_texture, opaque_depth_map,
+                                 peel_depth_map, depth_texture);
+    glDisable (GL_BLEND);
+    render_closet_opaque (&closet_scene);
 
-    // Clear framebuffer
-    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    int num_pass = 8;
 
-    // Render without blending to overwrite color buffer
+    // Transparent passes fragment shader slot content:
+    //
+    // COLOR BUFFER: color_texture
+    // DEPTH BUFFER: depth_texture
+    // uniform peel_depth_map: peel_depth_map
+    // uniform opaque_depth_map: opaque_depth_map
+    depth_peel_set_shader_slots (closet_scene.program_id,
+                                 color_texture, depth_texture,
+                                 peel_depth_map, opaque_depth_map);
+
     glDisable (GL_BLEND);
     render_closet_transparent (&closet_scene, &cl);
 
     glEnable (GL_BLEND);
     int i;
     for (i = 0; i < num_pass-1; i++) {
+        // Swap the depth buffer with peel_depth_map shader slot
         GLuint tmp = peel_depth_map;
         peel_depth_map = depth_texture;
         depth_texture = tmp;
 
-        set_depth_textures (closet_scene.program_id, depth_texture, peel_depth_map);
+        glFramebufferTexture2D (
+            GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+            GL_TEXTURE_2D_MULTISAMPLE, depth_texture, 0
+        );
+
+        glActiveTexture (GL_TEXTURE0);
+        glBindTexture (GL_TEXTURE_2D_MULTISAMPLE, peel_depth_map);
+        glUniform1i (glGetUniformLocation (closet_scene.program_id, "peel_depth_map"), 0);
 
         glClear(GL_DEPTH_BUFFER_BIT);
 
@@ -1758,13 +1816,15 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
         render_closet_transparent (&closet_scene, &cl);
     }
 
-    // Blend resulting color buffer into the window using the OVER operator
+    // Blend resulting color buffers into the window using the OVER operator
     glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
     draw_into_window (graphics);
     glClearColor(0.164f, 0.203f, 0.223f, 1.0f);
     glClear (GL_COLOR_BUFFER_BIT);
     set_texture_clip (&quad_renderer, graphics->screen_width, graphics->screen_height,
                       0, 0, graphics->width, graphics->height);
+    blend_premul_quad (&quad_renderer, opaque_color_texture, true, graphics,
+                        0, 0, graphics->width, graphics->height);
     blend_premul_quad (&quad_renderer, color_texture, true, graphics,
                         0, 0, graphics->width, graphics->height);
 
