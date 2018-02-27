@@ -293,6 +293,54 @@ vect3_t camera_compute_pos (struct camera_t *camera)
                   cos(camera->pitch)*cos(camera->yaw)*camera->distance);
 }
 
+void create_color_texture (GLuint *id, float width, float height, int num_samples)
+{
+    glGenTextures (1, id);
+    if (num_samples > 0) {
+        glBindTexture (GL_TEXTURE_2D_MULTISAMPLE, *id);
+
+        glTexImage2DMultisample (
+            GL_TEXTURE_2D_MULTISAMPLE, num_samples, GL_RGBA,
+            width, height, GL_FALSE
+        );
+    } else {
+        glBindTexture (GL_TEXTURE_2D, *id);
+
+        glTexImage2D (
+            GL_TEXTURE_2D, 0, GL_RGBA,
+            width, height, 0,
+            GL_RGBA, GL_UNSIGNED_BYTE, NULL
+        );
+
+        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    }
+}
+
+void create_depth_texture (GLuint *id, float width, float height, int num_samples)
+{
+    glGenTextures (1, id);
+    if (num_samples > 0) {
+        glBindTexture (GL_TEXTURE_2D_MULTISAMPLE, *id);
+
+        glTexImage2DMultisample (
+            GL_TEXTURE_2D_MULTISAMPLE, num_samples, GL_DEPTH_COMPONENT32F,
+            width, height, GL_FALSE
+        );
+    } else {
+        glBindTexture (GL_TEXTURE_2D, *id);
+
+        glTexImage2D (
+            GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F,
+            width, height, 0,
+            GL_DEPTH_COMPONENT, GL_FLOAT, NULL
+        );
+
+        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    }
+}
+
 struct gl_framebuffer_t {
     GLuint fb_id;
     GLuint tex_color_buffer;
@@ -1529,16 +1577,16 @@ void render_cube_test (struct cube_test_scene_t *scene)
     glDrawArrays (GL_TRIANGLES, 0, 36);
 }
 
-void set_depth_textures (struct cube_test_scene_t *scene, GLuint tex_depth_buffer, GLuint peel_depth_map)
+void set_depth_textures (struct cube_test_scene_t *scene, GLuint depth_texture, GLuint peel_depth_map)
 {
     glFramebufferTexture2D (
         GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-        GL_TEXTURE_2D, tex_depth_buffer, 0
+        GL_TEXTURE_2D_MULTISAMPLE, depth_texture, 0
     );
 
     glActiveTexture (GL_TEXTURE0);
-    glBindTexture (GL_TEXTURE_2D, peel_depth_map);
-    glUniform1i (glGetUniformLocation (scene->program_id, "depth_map"), 0);
+    glBindTexture (GL_TEXTURE_2D_MULTISAMPLE, peel_depth_map);
+    glUniform1i (glGetUniformLocation (scene->program_id, "peel_depth_map"), 0);
 }
 
 vec3f undefined_color = VEC3F (1,1,0);
@@ -1673,8 +1721,8 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     static struct camera_t main_camera;
 
     static GLuint fb;
-    static GLuint tex_color_buffer;
-    static GLuint tex_depth_buffer;
+    static GLuint color_texture;
+    static GLuint depth_texture;
     static GLuint peel_depth_map;
 
     if (!run_once) {
@@ -1692,50 +1740,19 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
         glGenFramebuffers (1, &fb);
         glBindFramebuffer (GL_FRAMEBUFFER, fb);
 
-        glGenTextures (1, &tex_color_buffer);
-        glBindTexture (GL_TEXTURE_2D, tex_color_buffer);
-
-        glTexImage2D (
-            GL_TEXTURE_2D, 0, GL_RGBA,
-            width, height, 0,
-            GL_RGBA, GL_UNSIGNED_BYTE, NULL
-        );
-
-        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        create_color_texture (&color_texture, width, height, 4);
 
         glFramebufferTexture2D (
             GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-            GL_TEXTURE_2D, tex_color_buffer, 0
+            GL_TEXTURE_2D_MULTISAMPLE, color_texture, 0
         );
 
-        glGenTextures (1, &peel_depth_map);
-        glBindTexture (GL_TEXTURE_2D, peel_depth_map);
-
-        glTexImage2D (
-            GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F,
-            width, height, 0,
-            GL_DEPTH_COMPONENT, GL_FLOAT, NULL
-        );
-
-        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-        glGenTextures (1, &tex_depth_buffer);
-        glBindTexture (GL_TEXTURE_2D, tex_depth_buffer);
-
-        glTexImage2D (
-            GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F,
-            width, height, 0,
-            GL_DEPTH_COMPONENT, GL_FLOAT, NULL
-        );
-
-        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        create_depth_texture (&peel_depth_map, width, height, 4);
+        create_depth_texture (&depth_texture, width, height, 4);
 
         glFramebufferTexture2D (
             GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-            GL_TEXTURE_2D, tex_depth_buffer, 0
+            GL_TEXTURE_2D_MULTISAMPLE, depth_texture, 0
         );
 
         quad_renderer = init_quad_renderer ();
@@ -1772,14 +1789,14 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     // Clear peel_depth_map
     glFramebufferTexture2D (
         GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-        GL_TEXTURE_2D, peel_depth_map, 0
+        GL_TEXTURE_2D_MULTISAMPLE, peel_depth_map, 0
     );
 
     glClearDepth (0);
     glClear (GL_DEPTH_BUFFER_BIT);
     glClearDepth (1);
 
-    set_depth_textures (&test_scene, tex_depth_buffer, peel_depth_map);
+    set_depth_textures (&test_scene, depth_texture, peel_depth_map);
 
     // Clear framebuffer
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
@@ -1793,10 +1810,10 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     int i;
     for (i = 0; i < num_pass-1; i++) {
         GLuint tmp = peel_depth_map;
-        peel_depth_map = tex_depth_buffer;
-        tex_depth_buffer = tmp;
+        peel_depth_map = depth_texture;
+        depth_texture = tmp;
 
-        set_depth_textures (&test_scene, tex_depth_buffer, peel_depth_map);
+        set_depth_textures (&test_scene, depth_texture, peel_depth_map);
 
         glClear(GL_DEPTH_BUFFER_BIT);
 
@@ -1805,11 +1822,12 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
         render_cube_test (&test_scene);
     }
 
+    // Blend resulting color buffer into the window using the OVER operator
     glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
     draw_into_window (graphics);
     glClearColor(0.164f, 0.203f, 0.223f, 1.0f);
     glClear (GL_COLOR_BUFFER_BIT);
-    blend_premul_quad (&quad_renderer, tex_color_buffer, false, graphics,
+    blend_premul_quad (&quad_renderer, color_texture, true, graphics,
                         0, 0, graphics->width, graphics->height);
 
     return true;

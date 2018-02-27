@@ -3,7 +3,7 @@ flat in vec3 normal;
 
 out vec4 out_color;
 
-uniform sampler2D depth_map;
+uniform sampler2DMS peel_depth_map;
 
 void main()
 {
@@ -41,8 +41,15 @@ void main()
     }
 #endif
 
-    float prev_depth = texelFetch (depth_map, ivec2(gl_FragCoord.xy), 0).r;
-    if (gl_FragCoord.z <= prev_depth) {
+    float avg_depth = 0;
+    for (int i = 0; i < 4; i++) {
+        float sample_depth = texelFetch (peel_depth_map, ivec2(gl_FragCoord.xy), i).r;
+        avg_depth += sample_depth;
+    }
+
+    avg_depth /= 4;
+
+    if (gl_FragCoord.z <= avg_depth + 0.000001) {
         discard;
     } else {
         out_color = vec4(res * alpha, alpha);
