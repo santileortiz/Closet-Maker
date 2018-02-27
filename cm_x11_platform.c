@@ -1734,8 +1734,8 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
             return blit_needed;
         }
 
-        float width = graphics->width;
-        float height = graphics->height;
+        float width = graphics->screen_width;
+        float height = graphics->screen_height;
         // Framebuffer creation
         glGenFramebuffers (1, &fb);
         glBindFramebuffer (GL_FRAMEBUFFER, fb);
@@ -1827,6 +1827,8 @@ bool update_and_render (struct app_state_t *st, app_graphics_t *graphics, app_in
     draw_into_window (graphics);
     glClearColor(0.164f, 0.203f, 0.223f, 1.0f);
     glClear (GL_COLOR_BUFFER_BIT);
+    set_texture_clip (&quad_renderer, graphics->screen_width, graphics->screen_height,
+                      0, 0, graphics->width, graphics->height);
     blend_premul_quad (&quad_renderer, color_texture, true, graphics,
                         0, 0, graphics->width, graphics->height);
 
