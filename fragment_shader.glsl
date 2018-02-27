@@ -1,9 +1,10 @@
-#version 150 core
+#version 400 core
 flat in vec3 normal;
 
 out vec4 out_color;
 
 uniform vec4 color;
+uniform sampler2DMS peel_depth_map;
 
 void main()
 {
@@ -14,8 +15,11 @@ void main()
         value *= 0.6;
     }
 
-    out_color = vec4 (color.r * value * color.a,
-                      color.g * value * color.a,
-                      color.b * value * color.a,
-                      color.a);
+    float sample_depth = texelFetch (peel_depth_map, ivec2(gl_FragCoord.xy), gl_SampleID).r;
+
+    if (gl_FragCoord.z <= sample_depth) {
+        discard;
+    } else {
+        out_color = vec4(color.rgb * value * color.a, color.a);
+    }
 }
