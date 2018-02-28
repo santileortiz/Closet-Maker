@@ -332,7 +332,7 @@ void str_debug_print (string_t *str)
 #endif
 
 #define str_new(data) strn_new((data),((data)!=NULL?strlen(data):0))
-string_t strn_new (char *c_str, size_t len)
+string_t strn_new (const char *c_str, size_t len)
 {
     string_t retval = {0};
     char *dest = str_init (&retval, len);
@@ -350,6 +350,18 @@ void strn_set (string_t *str, const char *c_str, size_t len)
     str_maybe_grow (str, len, false);
 
     char *dest = str_data(str);
+    if (c_str != NULL) {
+        memmove (dest, c_str, len);
+    }
+    dest[len] = '\0';
+}
+
+#define str_put(str,pos,c_str) strn_put(str,pos,(c_str),((c_str)!=NULL?strlen(c_str):0))
+void strn_put (string_t *str, size_t pos, const char *c_str, size_t len)
+{
+    str_maybe_grow (str, pos + len, false);
+
+    char *dest = str_data(str) + pos;
     if (c_str != NULL) {
         memmove (dest, c_str, len);
     }
@@ -377,6 +389,11 @@ void str_cat (string_t *dest, string_t *src)
     dest_data[len] = '\0';
 }
 
+char str_last (string_t *str)
+{
+    return str_data(str)[str_len(str)-1];
+}
+
 #define VECT_X 0
 #define VECT_Y 1
 #define VECT_Z 2
@@ -391,6 +408,10 @@ typedef union {
     struct {
         double x;
         double y;
+    };
+    struct {
+        double w;
+        double h;
     };
     double E[2];
 } dvec2;
@@ -1688,25 +1709,69 @@ char* full_file_read (mem_pool_t *pool, const char *path)
     char *dir_path = sh_expand (path, NULL);
 
     struct stat st;
-    if (stat(dir_path, &st) == -1) {
-        printf ("Error reading %s: %s\n", path, strerror(errno));
-        return retval;
+    if (stat(dir_path, &st) == 0) {
+        retval = (char*)pom_push_size (pool, st.st_size + 1);
+
+        int file = open (dir_path, O_RDONLY);
+        int bytes_read = 0;
+        do {
+            int status = read (file, retval+bytes_read, st.st_size-bytes_read);
+            if (status == -1) {
+                printf ("Error reading %s: %s\n", path, strerror(errno));
+                break;
+            }
+            bytes_read += status;
+        } while (bytes_read != st.st_size);
+        retval[st.st_size] = '\0';
+    } else {
+        printf ("Could not read %s: %s\n", path, strerror(errno));
     }
 
-    retval = (char*)pom_push_size (pool, st.st_size + 1);
+    free (dir_path);
+    return retval;
+}
 
-    int file = open (dir_path, O_RDONLY);
-    int bytes_read = 0;
-    do {
-        int status = read (file, retval+bytes_read, st.st_size-bytes_read);
-        if (status == -1) {
-            printf ("Error reading %s: %s\n", path, strerror(errno));
+char* full_file_read_prefix (mem_pool_t *out_pool, const char *path, char **prefix, int len)
+{
+    mem_pool_t pool = {0};
+    char *retval = NULL;
+    string_t pfx_s;
+    char *dir_path = sh_expand (path, &pool);
+
+    int status, i = 0;
+    struct stat st;
+    while ((status = (stat(dir_path, &st) == -1)) && i < len) {
+        if (errno == ENOENT && prefix != NULL && *prefix != NULL) {
+            str_set (&pfx_s, prefix[i]);
+            assert (str_last(&pfx_s) == '/');
+            string_t path_s = str_new (path);
+            str_cat (&pfx_s, &path_s);
+            dir_path = sh_expand (str_data(&pfx_s), &pool);
+            i++;
+        } else {
             break;
         }
-        bytes_read += status;
-    } while (bytes_read != st.st_size);
-    retval[st.st_size] = '\0';
-    free (dir_path);
+    }
+
+    if (status == 0) {
+        retval = (char*)pom_push_size (out_pool, st.st_size + 1);
+
+        int file = open (dir_path, O_RDONLY);
+        int bytes_read = 0;
+        do {
+            int status = read (file, retval+bytes_read, st.st_size-bytes_read);
+            if (status == -1) {
+                printf ("Error reading %s: %s\n", path, strerror(errno));
+                break;
+            }
+            bytes_read += status;
+        } while (bytes_read != st.st_size);
+        retval[st.st_size] = '\0';
+    } else {
+        printf ("Could not locate %s in any folder.\n", path);
+    }
+
+    mem_pool_destroy (&pool);
     return retval;
 }
 

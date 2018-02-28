@@ -105,7 +105,7 @@ enum cached_atom_names_t {
     LOC_ATOM_ATOM_PAIR,
 
     NUM_ATOMS_CACHE
-};                       
+};
 
 xcb_atom_t xcb_atoms_cache[NUM_ATOMS_CACHE];
 
@@ -214,7 +214,7 @@ char* get_x11_text_property (xcb_connection_t *c, mem_pool_t *pool,
     }
 
     if (reply_1->type != xcb_atoms_cache[LOC_ATOM_UTF8_STRING] &&
-        reply_1->type != XCB_ATOM_STRING && 
+        reply_1->type != XCB_ATOM_STRING &&
         reply_1->type != xcb_atoms_cache[LOC_ATOM_TEXT_MIME_CHARSET] &&
         reply_1->type != xcb_atoms_cache[LOC_ATOM_TEXT_MIME]) {
         mem_pool_t temp_pool = {0};
@@ -454,11 +454,11 @@ void x11_change_property (xcb_connection_t *c, xcb_drawable_t window,
                                          format,
                                          len,
                                          data);
-        
-        xcb_generic_error_t *error; 
-        if ((error = xcb_request_check(c, ck))) { 
-            printf("Error changing property %d\n", error->error_code); 
-            free(error); 
+
+        xcb_generic_error_t *error;
+        if ((error = xcb_request_check(c, ck))) {
+            printf("Error changing property %d\n", error->error_code);
+            free(error);
         }
     } else {
         xcb_change_property (c,
@@ -487,7 +487,7 @@ void x11_create_window (struct x_state *x_st, const char *title, int visual_id)
     mask |= XCB_CW_BORDER_PIXEL|XCB_CW_COLORMAP;
     xcb_colormap_t colormap = xcb_generate_id (x_st->xcb_c);
     xcb_create_colormap (x_st->xcb_c, XCB_COLORMAP_ALLOC_NONE,
-                         colormap, x_st->screen->root, visual_id); 
+                         colormap, x_st->screen->root, visual_id);
 
 
     uint32_t values[] = {// , // XCB_CW_BACK_PIXMAP
@@ -498,7 +498,7 @@ void x11_create_window (struct x_state *x_st, const char *title, int visual_id)
                          // , // XCB_CW_WIN_GRAVITY
                          // , // XCB_CW_BACKING_STORE
                          // , // XCB_CW_BACKING_PLANES
-                         // , // XCB_CW_BACKING_PIXEL     
+                         // , // XCB_CW_BACKING_PIXEL
                          // , // XCB_CW_OVERRIDE_REDIRECT
                          // , // XCB_CW_SAVE_UNDER
                          event_mask, //XCB_CW_EVENT_MASK
@@ -573,10 +573,10 @@ void x11_setup_icccm_and_ewmh_protocols (struct x_state *x_st)
 void blocking_xcb_sync_set_counter (xcb_connection_t *c, xcb_sync_counter_t counter, xcb_sync_int64_t *val)
 {
     xcb_void_cookie_t ck = xcb_sync_set_counter_checked (c, counter, *val);
-    xcb_generic_error_t *error; 
-    if ((error = xcb_request_check(c, ck))) { 
-        printf("Error setting counter %d\n", error->error_code); 
-        free(error); 
+    xcb_generic_error_t *error;
+    if ((error = xcb_request_check(c, ck))) {
+        printf("Error setting counter %d\n", error->error_code);
+        free(error);
     }
 }
 
@@ -606,10 +606,10 @@ void x11_print_window_name (struct x_state *x_st, xcb_drawable_t window)
 void x11_send_event (xcb_connection_t *c, xcb_drawable_t window, void *event)
 {
     xcb_void_cookie_t ck = xcb_send_event_checked (c, 0, window, 0, (const char*)event);
-    xcb_generic_error_t *error; 
-    if ((error = xcb_request_check(c, ck))) { 
-        printf("Error sending event. %d\n", error->error_code); 
-        free(error); 
+    xcb_generic_error_t *error;
+    if ((error = xcb_request_check(c, ck))) {
+        printf("Error sending event. %d\n", error->error_code);
+        free(error);
     }
 }
 
@@ -960,7 +960,7 @@ int main (void)
                         xcb_generic_error_t *error = (xcb_generic_error_t*)event;
                         printf("Received X11 error %d\n", error->error_code);
                     } break;
-                default: 
+                default:
                     /* Unknown event type, ignore it */
                     break;
             }

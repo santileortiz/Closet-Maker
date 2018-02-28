@@ -17,6 +17,8 @@ void debug_message_callback( GLenum source,
              type, severity, message );
 }
 
+static char *global_shader_folder = NULL;
+
 GLuint gl_program (const char *vertex_shader_source, const char *fragment_shader_source)
 {
     bool compilation_failed = false;
@@ -24,7 +26,7 @@ GLuint gl_program (const char *vertex_shader_source, const char *fragment_shader
     mem_pool_t pool = {0};
 
     // Vertex shader
-    const char* vertex_source = full_file_read (&pool, vertex_shader_source);
+    const char* vertex_source = full_file_read_prefix (&pool, vertex_shader_source, &global_shader_folder, 1);
 
     GLuint vertex_shader = glCreateShader (GL_VERTEX_SHADER);
     glShaderSource (vertex_shader, 1, &vertex_source, NULL);
@@ -40,7 +42,7 @@ GLuint gl_program (const char *vertex_shader_source, const char *fragment_shader
     }
 
     // Fragment shader
-    const char* fragment_source = full_file_read (&pool, fragment_shader_source);
+    const char* fragment_source = full_file_read_prefix (&pool, fragment_shader_source, &global_shader_folder, 1);
 
     GLuint fragment_shader = glCreateShader (GL_FRAGMENT_SHADER);
     glShaderSource (fragment_shader, 1, &fragment_source, NULL);

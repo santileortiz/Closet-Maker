@@ -360,6 +360,121 @@ void gui_destroy (struct gui_state_t *gui_st)
     mem_pool_destroy (&gui_st->thread_pool);
 }
 
+/////////////////
+// FONT BACKEND
+
+#ifdef __PANGO_H__
+#define new_pango_layout_from_style_fsw(cr,family,size,weight) \
+    new_pango_layout_from_style(cr, FONT_STYLE_FSW(family,size,weight))
+PangoLayout* new_pango_layout_from_style (cairo_t *cr, struct font_style_t *font_style)
+{
+    const char *font_family;
+    if (font_style->family == NULL) {
+        font_family = global_gui_st->default_font_style.family;
+    } else {
+        font_family = font_style->family;
+    }
+
+    int font_size;
+    if (font_style->size == 0) {
+        font_size = global_gui_st->default_font_style.size;
+    } else {
+        font_size = font_style->size;
+    }
+
+    css_font_weight_t css_font_weight;
+    if (font_style->weight == CSS_FONT_WEIGHT_NONE) {
+        css_font_weight = global_gui_st->default_font_style.weight;
+    } else {
+        css_font_weight = font_style->weight;
+    }
+
+    PangoWeight font_weight = PANGO_WEIGHT_NORMAL;
+    switch (css_font_weight) {
+        case CSS_FONT_WEIGHT_BOLD:
+            font_weight = PANGO_WEIGHT_BOLD;
+            break;
+        case CSS_FONT_WEIGHT_NORMAL:
+            font_weight = PANGO_WEIGHT_NORMAL;
+            break;
+        default:
+            invalid_code_path;
+            break;
+    }
+
+    PangoFontDescription *font_desc = pango_font_description_new ();
+    pango_font_description_set_family (font_desc, font_family);
+    pango_font_description_set_size (font_desc, font_size*PANGO_SCALE);
+    pango_font_description_set_weight (font_desc, font_weight);
+
+    PangoLayout *text_layout = pango_cairo_create_layout (cr);
+    pango_layout_set_font_description (text_layout, font_desc);
+    pango_font_description_free(font_desc);
+    return text_layout;
+}
+
+dvec2 compute_string_size (char *str, struct font_style_t *style)
+{
+    dvec2 res;
+    PangoLayout *text_layout =
+        new_pango_layout_from_style (global_gui_st->gr.cr, style);
+
+    // NOTE: I have the hunch that calls into Pango will be slow, so we ideally
+    // would like to call this function just once for each string that needs to
+    // be computed.
+    // TODO: Time this function and check if it's really a problem.
+    pango_layout_set_text (text_layout, str, -1);
+
+    PangoRectangle logical;
+    pango_layout_get_pixel_extents (text_layout, NULL, &logical);
+
+    res.x = logical.width;
+    res.y = logical.height;
+    g_object_unref (text_layout);
+    return res;
+}
+
+// NOTE: len == -1 means the string is null terminated.
+void render_text (cairo_t *cr, dvec2 pos, struct font_style_t *font_style,
+                  char *str, size_t len, dvec4 *color, dvec4 *bg_color,
+                  dvec2 *out_pos)
+{
+    PangoLayout *text_layout = new_pango_layout_from_style (cr, font_style);
+    pango_layout_set_text (text_layout, str, len);
+
+    PangoRectangle logical;
+    pango_layout_get_pixel_extents (text_layout, NULL, &logical);
+    dvec2_floor (&pos);
+    if (bg_color != NULL) {
+        cairo_set_source_rgba (cr, ARGS_RGBA(*bg_color));
+        cairo_rectangle (cr, pos.x, pos.y, logical.width, logical.height);
+        cairo_fill (cr);
+    }
+
+    if (out_pos != NULL ) {
+        out_pos->x = pos.x + logical.width;
+    }
+
+    cairo_set_source_rgba (cr, ARGS_RGBA(*color));
+    cairo_move_to (cr, pos.x, pos.y);
+    pango_cairo_show_layout (cr, text_layout);
+    g_object_unref (text_layout);
+}
+
+#else
+dvec2 compute_string_size (char *str, struct font_style_t *style)
+{
+    return DVEC2(0,0);
+}
+
+void render_text (cairo_t *cr, dvec2 pos, struct font_style_t *font_style,
+                  char *str, size_t len, dvec4 *color, dvec4 *bg_color,
+                  dvec2 *out_pos)
+{
+    return;
+}
+#endif
+
 void cairo_clear (cairo_t *cr)
 {
     cairo_save (cr);
@@ -918,81 +1033,10 @@ void add_behavior (struct gui_state_t *gui_st, layout_box_t *box, enum behavior_
     box->behavior = new_behavior;
 }
 
-#define new_pango_layout_from_style_fsw(cr,family,size,weight) \
-    new_pango_layout_from_style(cr, FONT_STYLE_FSW(family,size,weight))
-PangoLayout* new_pango_layout_from_style (cairo_t *cr, struct font_style_t font_style)
-{
-    const char *font_family;
-    if (font_style.family == NULL) {
-        font_family = global_gui_st->default_font_style.family;
-    } else {
-        font_family = font_style.family;
-    }
-
-    int font_size;
-    if (font_style.size == 0) {
-        font_size = global_gui_st->default_font_style.size;
-    } else {
-        font_size = font_style.size;
-    }
-
-    css_font_weight_t css_font_weight;
-    if (font_style.weight == CSS_FONT_WEIGHT_NONE) {
-        css_font_weight = global_gui_st->default_font_style.weight;
-    } else {
-        css_font_weight = font_style.weight;
-    }
-
-    PangoWeight font_weight = PANGO_WEIGHT_NORMAL;
-    switch (css_font_weight) {
-        case CSS_FONT_WEIGHT_BOLD:
-            font_weight = PANGO_WEIGHT_BOLD;
-            break;
-        case CSS_FONT_WEIGHT_NORMAL:
-            font_weight = PANGO_WEIGHT_NORMAL;
-            break;
-        default:
-            invalid_code_path;
-            break;
-    }
-
-    PangoFontDescription *font_desc = pango_font_description_new ();
-    pango_font_description_set_family (font_desc, font_family);
-    pango_font_description_set_size (font_desc, font_size*PANGO_SCALE);
-    pango_font_description_set_weight (font_desc, font_weight);
-
-    PangoLayout *text_layout = pango_cairo_create_layout (cr);
-    pango_layout_set_font_description (text_layout, font_desc);
-    pango_font_description_free(font_desc);
-    return text_layout;
-}
-
 void layout_set_content_str (layout_box_t *lay, char *str)
 {
     lay->content.type = LAYOUT_CONTENT_C_STRING;
     lay->content.str = str;
-}
-
-dvec2 compute_string_size (char *str, struct css_box_t *style)
-{
-    dvec2 res;
-    PangoLayout *text_layout =
-        new_pango_layout_from_style_fsw (global_gui_st->gr.cr,
-                                         style->font_family, style->font_size, style->font_weight);
-
-    // NOTE: I have the hunch that calls into Pango will be slow, so we ideally
-    // would like to call this function just once for each string that needs to
-    // be computed.
-    // TODO: Time this function and check if it's really a problem.
-    pango_layout_set_text (text_layout, str, -1);
-
-    PangoRectangle logical;
-    pango_layout_get_pixel_extents (text_layout, NULL, &logical);
-
-    res.x = logical.width;
-    res.y = logical.height;
-    g_object_unref (text_layout);
-    return res;
 }
 
 void compute_content_size (layout_box_t *lay)
@@ -1000,7 +1044,8 @@ void compute_content_size (layout_box_t *lay)
     switch (lay->content.type) {
         case LAYOUT_CONTENT_C_STRING:
             {
-                dvec2 size = compute_string_size (lay->content.str, lay->style);
+                struct font_style_t font_style = FONT_STYLE_CSS (lay->style);
+                dvec2 size = compute_string_size (lay->content.str, &font_style);
                 lay->content.width = size.x;
                 lay->content.height = size.y;
             } break;
@@ -1009,33 +1054,6 @@ void compute_content_size (layout_box_t *lay)
         default:
             invalid_code_path;
     }
-}
-
-// NOTE: len == -1 means the string is null terminated.
-void render_text (cairo_t *cr, dvec2 pos, struct font_style_t *font_style,
-                  char *str, size_t len, dvec4 *color, dvec4 *bg_color,
-                  dvec2 *out_pos)
-{
-    PangoLayout *text_layout = new_pango_layout_from_style (cr, *font_style);
-    pango_layout_set_text (text_layout, str, len);
-
-    PangoRectangle logical;
-    pango_layout_get_pixel_extents (text_layout, NULL, &logical);
-    dvec2_floor (&pos);
-    if (bg_color != NULL) {
-        cairo_set_source_rgba (cr, ARGS_RGBA(*bg_color));
-        cairo_rectangle (cr, pos.x, pos.y, logical.width, logical.height);
-        cairo_fill (cr);
-    }
-
-    if (out_pos != NULL ) {
-        out_pos->x = pos.x + logical.width;
-    }
-
-    cairo_set_source_rgba (cr, ARGS_RGBA(*color));
-    cairo_move_to (cr, pos.x, pos.y);
-    pango_cairo_show_layout (cr, text_layout);
-    g_object_unref (text_layout);
 }
 
 #define css_cont_size_to_lay_size(css_box,cont_size) \
@@ -1333,15 +1351,12 @@ void draw_text_shadows (app_graphics_t *gr, struct css_box_t *css,
             shadow_pos.y += curr_shadow->v_offset;
             render_text (cr, shadow_pos, &font_style, str, len, &curr_shadow->color, NULL, NULL);
         } else {
-            PangoLayout *text_layout = new_pango_layout_from_style (cr, font_style);
-            PangoRectangle logical;
-            pango_layout_set_text (text_layout, str, len);
-            pango_layout_get_pixel_extents (text_layout, NULL, &logical);
+            dvec2 size = compute_string_size (str, &font_style);
 
-            cairo_surface_t *single_shadow = 
+            cairo_surface_t *single_shadow =
                 cairo_image_surface_create (CAIRO_FORMAT_ARGB32,
-                                            logical.width + 2*curr_shadow->blur_radius,
-                                            logical.height + 2*curr_shadow->blur_radius);
+                                            size.w + 2*curr_shadow->blur_radius,
+                                            size.h + 2*curr_shadow->blur_radius);
             cairo_t *shadow_cr = cairo_create (single_shadow);
             dvec2 tmp_pos = DVEC2(curr_shadow->blur_radius, curr_shadow->blur_radius);
             render_text (shadow_cr, tmp_pos, &font_style, str, len, &curr_shadow->color, NULL, NULL);
@@ -1354,7 +1369,6 @@ void draw_text_shadows (app_graphics_t *gr, struct css_box_t *css,
 
             cairo_surface_destroy (single_shadow);
             cairo_destroy (shadow_cr);
-            g_object_unref (text_layout);
         }
         curr_shadow = curr_shadow->next;
     }
