@@ -393,8 +393,8 @@ typedef union {
         double y;
     };
     double E[2];
-} vect2_t;
-#define VECT2(x,y) ((vect2_t){{x,y}})
+} dvec2;
+#define DVEC2(x,y) ((dvec2){{x,y}})
 
 // TODO: These are 128 bit structs, they may take up a lot of space, maybe have
 // another one of 32 bits for small coordinates.
@@ -405,14 +405,14 @@ typedef union {
         int64_t y;
     };
     int64_t E[2];
-} vect2i_t;
-#define VECT2i(x,y) ((vect2i_t){{x,y}})
+} ivec2;
+#define IVEC2(x,y) ((ivec2){{x,y}})
 
-#define vect_equal(v1,v2) ((v1)->x == (v2)->x && (v1)->y == (v2)->y)
+#define vec_equal(v1,v2) ((v1)->x == (v2)->x && (v1)->y == (v2)->y)
 
 typedef struct {
-    vect2_t min;
-    vect2_t max;
+    dvec2 min;
+    dvec2 max;
 } box_t;
 
 void box_print (box_t *b)
@@ -420,94 +420,94 @@ void box_print (box_t *b)
     printf ("min: (%f, %f), max: (%f, %f)\n", b->min.x, b->min.y, b->max.x, b->max.y);
 }
 
-void vect2_floor (vect2_t *p)
+void dvec2_floor (dvec2 *p)
 {
     p->x = floor (p->x);
     p->y = floor (p->y);
 }
 
-void vect2_round (vect2_t *p)
+void dvec2_round (dvec2 *p)
 {
     p->x = round (p->x);
     p->y = round (p->y);
 }
 
 static inline
-vect2_t vect2_add (vect2_t v1, vect2_t v2)
+dvec2 dvec2_add (dvec2 v1, dvec2 v2)
 {
-    vect2_t res;
+    dvec2 res;
     res.x = v1.x+v2.x;
     res.y = v1.y+v2.y;
     return res;
 }
 
 static inline
-void vect2_add_to (vect2_t *v1, vect2_t v2)
+void dvec2_add_to (dvec2 *v1, dvec2 v2)
 {
     v1->x += v2.x;
     v1->y += v2.y;
 }
 
 static inline
-vect2_t vect2_subs (vect2_t v1, vect2_t v2)
+dvec2 dvec2_subs (dvec2 v1, dvec2 v2)
 {
-    vect2_t res;
+    dvec2 res;
     res.x = v1.x-v2.x;
     res.y = v1.y-v2.y;
     return res;
 }
 
 static inline
-void vect2_subs_to (vect2_t *v1, vect2_t v2)
+void dvec2_subs_to (dvec2 *v1, dvec2 v2)
 {
     v1->x -= v2.x;
     v1->y -= v2.y;
 }
 
 static inline
-vect2_t vect2_mult (vect2_t v, double k)
+dvec2 dvec2_mult (dvec2 v, double k)
 {
-    vect2_t res;
+    dvec2 res;
     res.x = v.x*k;
     res.y = v.y*k;
     return res;
 }
 
 static inline
-void vect2_mult_to (vect2_t *v, double k)
+void dvec2_mult_to (dvec2 *v, double k)
 {
     v->x *= k;
     v->y *= k;
 }
 
 static inline
-double vect2_dot (vect2_t v1, vect2_t v2)
+double dvec2_dot (dvec2 v1, dvec2 v2)
 {
     return v1.x*v2.x + v1.y*v2.y;
 }
 
 static inline
-double vect2_norm (vect2_t v)
+double dvec2_norm (dvec2 v)
 {
     return sqrt ((v.x)*(v.x) + (v.y)*(v.y));
 }
 
-double area_2 (vect2_t a, vect2_t b, vect2_t c)
+double area_2 (dvec2 a, dvec2 b, dvec2 c)
 {
     return (b.x-a.x)*(c.y-a.y) - (c.x-a.x)*(b.y-a.y);
 }
 
 // true if point c is to the left of a-->b
-bool left (vect2_t a, vect2_t b, vect2_t c)
+bool left (dvec2 a, dvec2 b, dvec2 c)
 {
     return area_2 (a, b, c) > 0;
 }
 
 // true if vector p points to the left of vector a
-#define left_vect(a,p) left(VECT2(0,0),a,p)
+#define left_vect(a,p) left(DVEC2(0,0),a,p)
 
 // true if point c is to the left or in a-->b
-bool left_on (vect2_t a, vect2_t b, vect2_t c)
+bool left_on (dvec2 a, dvec2 b, dvec2 c)
 {
     return area_2 (a, b, c) > -0.01;
 }
@@ -516,41 +516,41 @@ bool left_on (vect2_t a, vect2_t b, vect2_t c)
 //
 // NOTE: The return value is in the range [0, 2*M_PI).
 static inline
-double vect2_clockwise_angle_between (vect2_t v1, vect2_t v2)
+double dvec2_clockwise_angle_between (dvec2 v1, dvec2 v2)
 {
-    if (vect_equal (&v1, &v2)) {
+    if (vec_equal (&v1, &v2)) {
         return 0;
     } else if (left_vect (v2, v1))
-        return acos (vect2_dot (v1, v2)/(vect2_norm (v1)*vect2_norm(v2)));
+        return acos (dvec2_dot (v1, v2)/(dvec2_norm (v1)*dvec2_norm(v2)));
     else
-        return 2*M_PI - acos (vect2_dot (v1, v2)/(vect2_norm (v1)*vect2_norm(v2)));
+        return 2*M_PI - acos (dvec2_dot (v1, v2)/(dvec2_norm (v1)*dvec2_norm(v2)));
 }
 
 // Smallest angle between v1 to v2.
 //
 // NOTE: The return value is in the range [0, M_PI].
 static inline
-double vect2_angle_between (vect2_t v1, vect2_t v2)
+double dvec2_angle_between (dvec2 v1, dvec2 v2)
 {
-    if (vect_equal (&v1, &v2)) {
+    if (vec_equal (&v1, &v2)) {
         return 0;
     } else
-        return acos (vect2_dot (v1, v2)/(vect2_norm (v1)*vect2_norm(v2)));
+        return acos (dvec2_dot (v1, v2)/(dvec2_norm (v1)*dvec2_norm(v2)));
 }
 
 static inline
-void vect2_normalize (vect2_t *v)
+void dvec2_normalize (dvec2 *v)
 {
-    double norm = vect2_norm (*v);
+    double norm = dvec2_norm (*v);
     assert (norm != 0);
     v->x /= norm;
     v->y /= norm;
 }
 
 static inline
-void vect2_normalize_or_0 (vect2_t *v)
+void dvec2_normalize_or_0 (dvec2 *v)
 {
-    double norm = vect2_norm (*v);
+    double norm = dvec2_norm (*v);
     if (norm == 0) {
         v->x = 0;
         v->y = 0;
@@ -560,34 +560,34 @@ void vect2_normalize_or_0 (vect2_t *v)
     }
 }
 
-vect2_t vect2_clockwise_rotate (vect2_t v, double rad)
+dvec2 dvec2_clockwise_rotate (dvec2 v, double rad)
 {
-    vect2_t res;
+    dvec2 res;
     res.x =  v.x*cos(rad) + v.y*sin(rad);
     res.y = -v.x*sin(rad) + v.y*cos(rad);
     return res;
 }
 
-void vect2_clockwise_rotate_on (vect2_t *v, double rad)
+void dvec2_clockwise_rotate_on (dvec2 *v, double rad)
 {
-    vect2_t tmp = *v;
+    dvec2 tmp = *v;
     v->x =  tmp.x*cos(rad) + tmp.y*sin(rad);
     v->y = -tmp.x*sin(rad) + tmp.y*cos(rad);
 }
 
 static inline
-double vect2_distance (vect2_t *v1, vect2_t *v2)
+double dvec2_distance (dvec2 *v1, dvec2 *v2)
 {
-    if (vect_equal(v1, v2)) {
+    if (vec_equal(v1, v2)) {
         return 0;
     } else {
         return sqrt ((v1->x-v2->x)*(v1->x-v2->x) + (v1->y-v2->y)*(v1->y-v2->y));
     }
 }
 
-void vect2_print (vect2_t *v)
+void dvec2_print (dvec2 *v)
 {
-    printf ("(%f, %f) [%f]\n", v->x, v->y, vect2_norm(*v));
+    printf ("(%f, %f) [%f]\n", v->x, v->y, dvec2_norm(*v));
 }
 
 // NOTE: W anf H MUST be positive.
@@ -617,19 +617,19 @@ typedef union {
         float b;
     };
     float E[3];
-} vec3f;
-#define VEC3F(x,y,z) ((vec3f){{x,y,z}})
+} fvec3;
+#define FVEC3(x,y,z) ((fvec3){{x,y,z}})
 
 static inline
-double vec3f_dot (vec3f v1, vec3f v2)
+double fvec3_dot (fvec3 v1, fvec3 v2)
 {
     return v1.x*v2.x + v1.y*v2.y + v1.z*v2.z;
 }
 
 static inline
-vec3f vec3f_cross (vec3f v1, vec3f v2)
+fvec3 fvec3_cross (fvec3 v1, fvec3 v2)
 {
-    vec3f res;
+    fvec3 res;
     res.x = v1.y*v2.z - v1.z*v2.y;
     res.y = v1.z*v2.x - v1.x*v2.z;
     res.z = v1.x*v2.y - v1.y*v2.x;
@@ -637,9 +637,9 @@ vec3f vec3f_cross (vec3f v1, vec3f v2)
 }
 
 static inline
-vec3f vec3f_subs (vec3f v1, vec3f v2)
+fvec3 fvec3_subs (fvec3 v1, fvec3 v2)
 {
-    vec3f res;
+    fvec3 res;
     res.x = v1.x-v2.x;
     res.y = v1.y-v2.y;
     res.z = v1.z-v2.z;
@@ -647,9 +647,9 @@ vec3f vec3f_subs (vec3f v1, vec3f v2)
 }
 
 static inline
-vec3f vec3f_mult (vec3f v, float k)
+fvec3 fvec3_mult (fvec3 v, float k)
 {
-    vec3f res;
+    fvec3 res;
     res.x = v.x*k;
     res.y = v.y*k;
     res.z = v.z*k;
@@ -657,9 +657,9 @@ vec3f vec3f_mult (vec3f v, float k)
 }
 
 static inline
-vec3f vec3f_mult_to (vec3f *v, float k)
+fvec3 fvec3_mult_to (fvec3 *v, float k)
 {
-    vec3f res;
+    fvec3 res;
     v->x = v->x*k;
     v->y = v->y*k;
     v->z = v->z*k;
@@ -667,16 +667,16 @@ vec3f vec3f_mult_to (vec3f *v, float k)
 }
 
 static inline
-double vec3f_norm (vec3f v)
+double fvec3_norm (fvec3 v)
 {
     return sqrt ((v.x)*(v.x) + (v.y)*(v.y) + (v.z)*(v.z));
 }
 
 static inline
-vec3f vec3f_normalize (vec3f v)
+fvec3 fvec3_normalize (fvec3 v)
 {
-    vec3f res;
-    double norm = vec3f_norm (v);
+    fvec3 res;
+    double norm = fvec3_norm (v);
     assert (norm != 0);
     res.x = v.x/norm;
     res.y = v.y/norm;
@@ -684,12 +684,12 @@ vec3f vec3f_normalize (vec3f v)
     return res;
 }
 
-void vec3f_print_norm (vec3f v)
+void fvec3_print_norm (fvec3 v)
 {
-    printf ("(%f, %f, %f) [%f]\n", v.x, v.y, v.z, vec3f_norm(v));
+    printf ("(%f, %f, %f) [%f]\n", v.x, v.y, v.z, fvec3_norm(v));
 }
 
-void vec3f_print (vec3f v)
+void fvec3_print (fvec3 v)
 {
     printf ("(%f, %f, %f)\n", v.x, v.y, v.z);
 }
@@ -707,19 +707,19 @@ typedef union {
         double b;
     };
     double E[3];
-} vect3_t;
-#define VECT3(x,y,z) ((vect3_t){{x,y,z}})
+} dvec3;
+#define DVEC3(x,y,z) ((dvec3){{x,y,z}})
 
 static inline
-double vect3_dot (vect3_t v1, vect3_t v2)
+double dvec3_dot (dvec3 v1, dvec3 v2)
 {
     return v1.x*v2.x + v1.y*v2.y + v1.z*v2.z;
 }
 
 static inline
-vect3_t vect3_cross (vect3_t v1, vect3_t v2)
+dvec3 dvec3_cross (dvec3 v1, dvec3 v2)
 {
-    vect3_t res;
+    dvec3 res;
     res.x = v1.y*v2.z - v1.z*v2.y;
     res.y = v1.z*v2.x - v1.x*v2.z;
     res.z = v1.x*v2.y - v1.y*v2.x;
@@ -727,9 +727,9 @@ vect3_t vect3_cross (vect3_t v1, vect3_t v2)
 }
 
 static inline
-vect3_t vect3_subs (vect3_t v1, vect3_t v2)
+dvec3 dvec3_subs (dvec3 v1, dvec3 v2)
 {
-    vect3_t res;
+    dvec3 res;
     res.x = v1.x-v2.x;
     res.y = v1.y-v2.y;
     res.z = v1.z-v2.z;
@@ -737,9 +737,9 @@ vect3_t vect3_subs (vect3_t v1, vect3_t v2)
 }
 
 static inline
-vect3_t vect3_mult (vect3_t v, float k)
+dvec3 dvec3_mult (dvec3 v, float k)
 {
-    vect3_t res;
+    dvec3 res;
     res.x = v.x*k;
     res.y = v.y*k;
     res.z = v.z*k;
@@ -747,9 +747,9 @@ vect3_t vect3_mult (vect3_t v, float k)
 }
 
 static inline
-vect3_t vect3_mult_to (vect3_t *v, float k)
+dvec3 dvec3_mult_to (dvec3 *v, float k)
 {
-    vect3_t res;
+    dvec3 res;
     v->x = v->x*k;
     v->y = v->y*k;
     v->z = v->z*k;
@@ -757,16 +757,16 @@ vect3_t vect3_mult_to (vect3_t *v, float k)
 }
 
 static inline
-double vect3_norm (vect3_t v)
+double dvec3_norm (dvec3 v)
 {
     return sqrt ((v.x)*(v.x) + (v.y)*(v.y) + (v.z)*(v.z));
 }
 
 static inline
-vect3_t vect3_normalize (vect3_t v)
+dvec3 dvec3_normalize (dvec3 v)
 {
-    vect3_t res;
-    double norm = vect3_norm (v);
+    dvec3 res;
+    double norm = dvec3_norm (v);
     assert (norm != 0);
     res.x = v.x/norm;
     res.y = v.y/norm;
@@ -774,9 +774,9 @@ vect3_t vect3_normalize (vect3_t v)
     return res;
 }
 
-void vect3_print (vect3_t v)
+void dvec3_print (dvec3 v)
 {
-    printf ("(%f, %f, %f) [%f]\n", v.x, v.y, v.z, vect3_norm(v));
+    printf ("(%f, %f, %f) [%f]\n", v.x, v.y, v.z, dvec3_norm(v));
 }
 
 typedef union {
@@ -800,12 +800,225 @@ typedef union {
         double l;
     };
     double E[4];
-} vect4_t;
-#define VECT4(x,y,z,w) ((vect4_t){{x,y,z,w}})
+} dvec4;
+#define DVEC4(x,y,z,w) ((dvec4){{x,y,z,w}})
 
-void vect4_print (vect4_t *v)
+void dvec4_print (dvec4 *v)
 {
     printf ("(%f, %f, %f, %f)", v->x, v->y, v->z, v->w);
+}
+
+// NOTE: Transpose before uploading to OpenGL!!
+typedef union {
+    float E[16];
+    float M[4][4]; // [down][right]
+} mat4f;
+
+// NOTE: Camera will be looking towards -Cz.
+static inline
+mat4f camera_matrix (dvec3 Cx, dvec3 Cy, dvec3 Cz, dvec3 Cpos)
+{
+    mat4f matrix;
+    int i = 0, j;
+    for (j=0; j<3; j++) {
+        matrix.E[i*4+j] = Cx.E[j];
+    }
+
+    matrix.E[i*4+j] = -dvec3_dot (Cpos, Cx);
+
+    i = 1;
+    for (j=0; j<3; j++) {
+        matrix.E[i*4+j] = Cy.E[j];
+    }
+    matrix.E[i*4+j] = -dvec3_dot (Cpos, Cy);
+
+    i = 2;
+    for (j=0; j<3; j++) {
+        matrix.E[i*4+j] = -Cz.E[j];
+    }
+    matrix.E[i*4+j] = dvec3_dot (Cpos, Cz);
+
+    i = 3;
+    for (j=0; j<3; j++) {
+        matrix.E[i*4+j] = 0;
+    }
+    matrix.E[i*4+j] = 1;
+    return matrix;
+}
+
+static inline
+mat4f look_at (dvec3 camera, dvec3 target, dvec3 up)
+{
+    dvec3 Cz = dvec3_normalize (dvec3_subs (camera, target));
+    dvec3 Cx = dvec3_normalize (dvec3_cross (up, Cz));
+    dvec3 Cy = dvec3_cross (Cz, Cx);
+    return camera_matrix (Cx, Cy, Cz, camera);
+}
+
+static inline
+mat4f rotation_x (float angle_r)
+{
+    float s = sinf(angle_r);
+    float c = cosf(angle_r);
+    mat4f res = {{
+         1, 0, 0, 0,
+         0, c,-s, 0,
+         0, s, c, 0,
+         0, 0, 0, 1
+    }};
+    return res;
+}
+
+static inline
+mat4f rotation_y (float angle_r)
+{
+    float s = sinf(angle_r);
+    float c = cosf(angle_r);
+    mat4f res = {{
+         c, 0, s, 0,
+         0, 1, 0, 0,
+        -s, 0, c, 0,
+         0, 0, 0, 1
+    }};
+    return res;
+}
+
+static inline
+mat4f rotation_z (float angle_r)
+{
+    float s = sinf(angle_r);
+    float c = cosf(angle_r);
+    mat4f res = {{
+         c,-s, 0, 0,
+         s, c, 0, 0,
+         0, 0, 1, 0,
+         0, 0, 0, 1
+    }};
+    return res;
+}
+
+void mat4f_print (mat4f mat)
+{
+    int i;
+    for (i=0; i<4; i++) {
+        int j;
+        for (j=0; j<4; j++) {
+            printf ("%f, ", mat.E[i*4+j]);
+        }
+        printf ("\n");
+    }
+    printf ("\n");
+}
+
+static inline
+mat4f perspective_projection (float left, float right, float bottom, float top, float near, float far)
+{
+    // NOTE: There are several conventions for the semantics of the near and far
+    // arguments to this function:
+    //  - OpenGL assumes them to be distances to the camera and fails if either
+    //    near or far is negative. This may be confusing because the other
+    //    values are assumed to be coordinates and near and far are not,
+    //    otherwise they would be negative because OpenGL uses RH coordinates.
+    //  - We can make all argumets be the coordinates, then if the near plane or
+    //    far plane coordinates are positive we throw an error.
+    //  - A third approach is to mix both of them by taking the absolute value
+    //    of the near and far plane and never fail. This works fine if they are
+    //    interpreted as being Z coordinates, or distances to the camera at the
+    //    cost of computing two absolute values.
+    near = fabs (near);
+    far = fabs (far);
+
+    float a = 2*near/(right-left);
+    float b = -(right+left)/(right-left);
+
+    float c = 2*near/(top-bottom);
+    float d = -(top+bottom)/(top-bottom);
+
+    float e = (near+far)/(far-near);
+    float f = -2*far*near/(far-near);
+
+    mat4f res = {{
+        a, 0, b, 0,
+        0, c, d, 0,
+        0, 0, e, f,
+        0, 0, 1, 0,
+    }};
+    return res;
+}
+
+static inline
+mat4f mat4f_mult (mat4f mat1, mat4f mat2)
+{
+    mat4f res = ZERO_INIT(mat4f);
+    int i;
+    for (i=0; i<4; i++) {
+        int j;
+        for (j=0; j<4; j++) {
+            int k;
+            for (k=0; k<4; k++) {
+                res.M[i][j] += mat1.M[i][k] * mat2.M[k][j];
+            }
+        }
+    }
+    return res;
+}
+
+static inline
+dvec3 mat4f_times_point (mat4f mat, dvec3 p)
+{
+    dvec3 res = DVEC3(0,0,0);
+    int i;
+    for (i=0; i<3; i++) {
+        int j;
+        for (j=0; j<3; j++) {
+            res.E[i] += mat.M[i][j] * p.E[j];
+        }
+    }
+
+    for (i=0; i<3; i++) {
+        res.E[i] += mat.M[i][3];
+    }
+    return res;
+}
+
+// The resulting transform sends s1 and s2 to d1 and d2 respectiveley.
+//   s1 = res * d1
+//   s2 = res * d2
+static inline
+mat4f transform_from_2_points (dvec3 s1, dvec3 s2, dvec3 d1, dvec3 d2)
+{
+    float xs, x0, ys, y0, zs, z0;
+    if (s1.x != s2.x) {
+        xs = (d1.x - d2.x)/(s1.x - s2.x);
+        x0 = (d2.x*s1.x - d2.x*s2.x - d1.x*s2.x + d2.x*s2.x)/(s1.x - s2.x);
+    } else {
+        xs = 1;
+        x0 = 0;
+    }
+
+    if (s1.y != s2.y) {
+        ys = (d1.y - d2.y)/(s1.y - s2.y);
+        y0 = (d2.y*s1.y - d2.y*s2.y - d1.y*s2.y + d2.y*s2.y)/(s1.y - s2.y);
+    } else {
+        ys = 1;
+        y0 = 0;
+    }
+
+    if (s1.z != s2.z) {
+        zs = (d1.z - d2.z)/(s1.z - s2.z);
+        z0 = (d2.z*s1.z - d2.z*s2.z - d1.z*s2.z + d2.z*s2.z)/(s1.z - s2.z);
+    } else {
+        zs = 1;
+        z0 = 0;
+    }
+
+    mat4f res = {{
+        xs, 0, 0,x0,
+         0,ys, 0,y0,
+         0, 0,zs,z0,
+         0, 0, 0, 1
+    }};
+    return res;
 }
 
 void swap (int*a, int*b)

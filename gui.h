@@ -4,11 +4,11 @@
 
 #if !defined(GUI_H)
 
-#define RGBA VECT4
-#define RGB(r,g,b) VECT4(r,g,b,1)
-#define ARGS_RGBA(vect4) (vect4).r, (vect4).g, (vect4).b, (vect4).a
-#define ARGS_RGB(vect4) (vect4.r), (vect4).g, (vect4).b
-#define RGB_HEX(hex) VECT4(((double)(((hex)&0xFF0000) >> 16))/255, \
+#define RGBA DVEC4
+#define RGB(r,g,b) DVEC4(r,g,b,1)
+#define ARGS_RGBA(c) (c).r, (c).g, (c).b, (c).a
+#define ARGS_RGB(c) (c.r), (c).g, (c).b
+#define RGB_HEX(hex) DVEC4(((double)(((hex)&0xFF0000) >> 16))/255, \
                            ((double)(((hex)&0x00FF00) >>  8))/255, \
                            ((double)((hex)&0x0000FF))/255, 1)
 
@@ -36,7 +36,7 @@ typedef struct {
     float wheel;
     char mouse_down[3];
 
-    vect2_t ptr;
+    dvec2 ptr;
 } app_input_t;
 
 enum layout_content_type_t {
@@ -50,7 +50,7 @@ typedef struct {
         char *str;
         // image_t *image // Not yet implemented
     };
-    //vect2_t pos; // Is this useful? so far there are no usecases
+    //dvec2 pos; // Is this useful? so far there are no usecases
     double width;
     double height;
 } layout_content_t;
@@ -109,7 +109,7 @@ struct text_shadow_t {
     double h_offset;
     double v_offset;
     double blur_radius;
-    vect4_t color;
+    dvec4 color;
 };
 
 // NOTE: The 'inset' field is handled by having  separate lists in css_box_t.
@@ -119,7 +119,7 @@ struct box_shadow_t {
     double v_offset;
     double blur_radius;
     double spread_distance;
-    vect4_t color;
+    dvec4 color;
 };
 
 struct css_box_t {
@@ -128,14 +128,14 @@ struct css_box_t {
     struct css_box_t *selector_focus;
     struct css_box_t *selector_disabled;
     double border_radius;
-    vect4_t border_color;
+    dvec4 border_color;
     double border_width;
     double padding_x;
     double padding_y;
     double min_width;
     double min_height;
-    vect4_t background_color;
-    vect4_t color;
+    dvec4 background_color;
+    dvec4 color;
 
     struct box_shadow_t *outset_shadows;
     struct box_shadow_t *inset_shadows;
@@ -147,7 +147,7 @@ struct css_box_t {
     css_font_weight_t font_weight;
 
     int num_gradient_stops;
-    vect4_t *gradient_stops;
+    dvec4 *gradient_stops;
 };
 
 typedef enum {
@@ -197,8 +197,8 @@ struct selection_t {
     layout_box_t *dest;
     char *start;
     int32_t len; // -1 means select string untill the end.
-    vect4_t color;
-    vect4_t background_color;
+    dvec4 color;
+    dvec4 background_color;
 };
 
 enum behavior_type_t {
@@ -214,7 +214,7 @@ struct behavior_t {
         bool *b;
         int *i32;
         float *r32;
-        vect2_t *vect2;
+        dvec2 *v2;
         uint64_string_t *u64_str;
     } target;
     layout_box_t *box;
@@ -245,8 +245,8 @@ struct gui_state_t {
     mem_pool_temp_marker_t thread_mem_flush;
 
     char dragging[3];
-    vect2_t ptr_delta;
-    vect2_t click_coord[3];
+    dvec2 ptr_delta;
+    dvec2 click_coord[3];
     bool mouse_clicked[3];
     bool mouse_double_clicked[3];
     float time_since_last_click[3]; // in ms
@@ -272,32 +272,32 @@ struct gui_state_t {
 
 struct gui_state_t *global_gui_st;
 static inline
-vect4_t shade (vect4_t *in, double f);
+dvec4 shade (dvec4 *in, double f);
 static inline
-vect4_t mix (vect4_t *c1, vect4_t *c2, double f);
+dvec4 mix (dvec4 *c1, dvec4 *c2, double f);
 static inline
-vect4_t alpha (vect4_t c, double f);
+dvec4 alpha (dvec4 c, double f);
 
 // Forward declaration of CSS "stylesheet"
 
-vect4_t BLACK_500 = RGB_HEX(0x333333);
-vect4_t SILVER_100 = RGB_HEX(0xfafafa);
-vect4_t SILVER_300 = RGB_HEX(0xd4d4d4);
+dvec4 BLACK_500 = RGB_HEX(0x333333);
+dvec4 SILVER_100 = RGB_HEX(0xfafafa);
+dvec4 SILVER_300 = RGB_HEX(0xd4d4d4);
 
-vect4_t text_color;
-vect4_t text_color_primary;
-vect4_t text_shadow_color = RGBA (1, 1, 1, 0.4);
-vect4_t text_color_primary_shadw;
-vect4_t titlebar_color;
-vect4_t base_color = RGB(1,1,1);
-vect4_t bg_color;
-vect4_t selected_bg_color = RGB(0.239216, 0.607843, 0.854902);
-vect4_t selected_fg_color = RGB(1,1,1);
-vect4_t insensitive_color;
-vect4_t bg_highlight_color = RGB(1,1,1);
-vect4_t border_color = RGBA(0,0,0,0.25);
-vect4_t inset_dark_color = RGBA(0,0,0,0.06);
-vect4_t color_accent = RGB_HEX(0x3d9bda);
+dvec4 text_color;
+dvec4 text_color_primary;
+dvec4 text_shadow_color = RGBA (1, 1, 1, 0.4);
+dvec4 text_color_primary_shadw;
+dvec4 titlebar_color;
+dvec4 base_color = RGB(1,1,1);
+dvec4 bg_color;
+dvec4 selected_bg_color = RGB(0.239216, 0.607843, 0.854902);
+dvec4 selected_fg_color = RGB(1,1,1);
+dvec4 insensitive_color;
+dvec4 bg_highlight_color = RGB(1,1,1);
+dvec4 border_color = RGBA(0,0,0,0.25);
+dvec4 inset_dark_color = RGBA(0,0,0,0.06);
+dvec4 color_accent = RGB_HEX(0x3d9bda);
 
 void init_button (mem_pool_t *pool, struct css_box_t *box);
 void init_button_active (mem_pool_t *pool, struct css_box_t *box);
@@ -369,7 +369,7 @@ void cairo_clear (cairo_t *cr)
 }
 
 int _g_gui_num_colors = 0;
-vect4_t _g_gui_colors[50];
+dvec4 _g_gui_colors[50];
 
 #define int_string_inc(int_str) int_string_update(int_str,(int_str)->i+1)
 #define int_string_dec(int_str) int_string_update(int_str,(int_str)->i-1)
@@ -428,7 +428,19 @@ double best_fit_ratio (double a_width, double a_height,
     }
 }
 
-void pixel_align_as_line (vect2_t *p, int line_width)
+static inline
+float px_to_m_x (app_graphics_t *graphics, float x_val_in_px)
+{
+    return x_val_in_px / (1000 * (float)graphics->x_dpi);
+}
+
+static inline
+float px_to_m_y (app_graphics_t *graphics, float y_val_in_px)
+{
+    return y_val_in_px / (1000 * (float)graphics->y_dpi);
+}
+
+void pixel_align_as_line (dvec2 *p, int line_width)
 {
     p->x = floor (p->x)+(double)(line_width%2)/2;
     p->y = floor (p->y)+(double)(line_width%2)/2;
@@ -497,7 +509,7 @@ struct rounded_box_t css_get_padding_box (struct css_box_t *css, layout_box_t *l
     return res;
 }
 
-#define is_vect2_in_box(v2,box) is_point_in_box((v2).x,(v2).y,(box).min.x,\
+#define is_dvec2_in_box(v2,box) is_point_in_box((v2).x,(v2).y,(box).min.x,\
                                                 (box).min.y,BOX_WIDTH(box),BOX_HEIGHT(box))
 bool is_point_in_box (double p_x, double p_y, double x, double y, double width, double height)
 {
@@ -571,7 +583,7 @@ void update_input (struct gui_state_t *gui_st, app_input_t input)
 
     // Detect dragging with minimum distance threshold
     if (input.mouse_down[0]) {
-        if (vect2_distance (&input.ptr, &gui_st->click_coord[0]) > gui_st->min_distance_for_drag) {
+        if (dvec2_distance (&input.ptr, &gui_st->click_coord[0]) > gui_st->min_distance_for_drag) {
             gui_st->dragging[0] = true;
         }
     } else {
@@ -768,8 +780,8 @@ void update_selectors (struct gui_state_t *gui_st, layout_box_t *layout_boxes, i
         layout_box_t *curr_box = layout_boxes + i;
         // TODO: is_ptr_inside should consider z-axis so that only visible boxes are
         // triggered.
-        bool is_ptr_inside = is_vect2_in_box (global_gui_st->input.ptr, curr_box->box);
-        bool click_started_inside = is_vect2_in_box (global_gui_st->click_coord[0], curr_box->box);
+        bool is_ptr_inside = is_dvec2_in_box (global_gui_st->input.ptr, curr_box->box);
+        bool click_started_inside = is_dvec2_in_box (global_gui_st->click_coord[0], curr_box->box);
 
         css_selector_t old = curr_box->active_selectors;
         if (!(curr_box->active_selectors & CSS_SEL_DISABLED)) {
@@ -807,8 +819,8 @@ void init_layout_box_style (struct gui_state_t *gui_st, layout_box_t *box, css_s
 void layout_box_uninitialize (layout_box_t *lay)
 {
     *lay = (layout_box_t){0};
-    lay->box.min = VECT2 (NAN, NAN);
-    lay->box.max = VECT2 (NAN, NAN);
+    lay->box.min = DVEC2 (NAN, NAN);
+    lay->box.max = DVEC2 (NAN, NAN);
 }
 
 #define is_box_initialized(lay_box) \
@@ -961,9 +973,9 @@ void layout_set_content_str (layout_box_t *lay, char *str)
     lay->content.str = str;
 }
 
-vect2_t compute_string_size (char *str, struct css_box_t *style)
+dvec2 compute_string_size (char *str, struct css_box_t *style)
 {
-    vect2_t res;
+    dvec2 res;
     PangoLayout *text_layout =
         new_pango_layout_from_style_fsw (global_gui_st->gr.cr,
                                          style->font_family, style->font_size, style->font_weight);
@@ -988,7 +1000,7 @@ void compute_content_size (layout_box_t *lay)
     switch (lay->content.type) {
         case LAYOUT_CONTENT_C_STRING:
             {
-                vect2_t size = compute_string_size (lay->content.str, lay->style);
+                dvec2 size = compute_string_size (lay->content.str, lay->style);
                 lay->content.width = size.x;
                 lay->content.height = size.y;
             } break;
@@ -1000,16 +1012,16 @@ void compute_content_size (layout_box_t *lay)
 }
 
 // NOTE: len == -1 means the string is null terminated.
-void render_text (cairo_t *cr, vect2_t pos, struct font_style_t *font_style,
-                  char *str, size_t len, vect4_t *color, vect4_t *bg_color,
-                  vect2_t *out_pos)
+void render_text (cairo_t *cr, dvec2 pos, struct font_style_t *font_style,
+                  char *str, size_t len, dvec4 *color, dvec4 *bg_color,
+                  dvec2 *out_pos)
 {
     PangoLayout *text_layout = new_pango_layout_from_style (cr, *font_style);
     pango_layout_set_text (text_layout, str, len);
 
     PangoRectangle logical;
     pango_layout_get_pixel_extents (text_layout, NULL, &logical);
-    vect2_floor (&pos);
+    dvec2_floor (&pos);
     if (bg_color != NULL) {
         cairo_set_source_rgba (cr, ARGS_RGBA(*bg_color));
         cairo_rectangle (cr, pos.x, pos.y, logical.width, logical.height);
@@ -1043,14 +1055,14 @@ void css_cont_size_to_lay_size_w_h (struct css_box_t *css_box,
 }
 
 void layout_size_from_css_content_size (struct css_box_t *css_box,
-                                        vect2_t css_content_size, vect2_t *layout_size)
+                                        dvec2 css_content_size, dvec2 *layout_size)
 {
     *layout_size = css_content_size;
     css_cont_size_to_lay_size (css_box, layout_size);
 }
 
 static inline
-uint64_t rgb_to_uint (vect4_t rgb)
+uint64_t rgb_to_uint (dvec4 rgb)
 {
     return ((uint32_t)(rgb.r*255) << 16) +
            ((uint32_t)(rgb.g*255) <<  8) +
@@ -1304,7 +1316,7 @@ void draw_inset_shadows (app_graphics_t *gr, struct css_box_t *css, layout_box_t
 }
 
 void draw_text_shadows (app_graphics_t *gr, struct css_box_t *css,
-                        vect2_t pos, char *str, int len)
+                        dvec2 pos, char *str, int len)
 {
     if (css->text_shadows == NULL) {
         return;
@@ -1315,7 +1327,7 @@ void draw_text_shadows (app_graphics_t *gr, struct css_box_t *css,
 
     struct font_style_t font_style = FONT_STYLE_CSS(css);
     while (curr_shadow != NULL) {
-        vect2_t shadow_pos = pos;
+        dvec2 shadow_pos = pos;
         if (curr_shadow->blur_radius == 0) {
             shadow_pos.x += curr_shadow->h_offset;
             shadow_pos.y += curr_shadow->v_offset;
@@ -1331,7 +1343,7 @@ void draw_text_shadows (app_graphics_t *gr, struct css_box_t *css,
                                             logical.width + 2*curr_shadow->blur_radius,
                                             logical.height + 2*curr_shadow->blur_radius);
             cairo_t *shadow_cr = cairo_create (single_shadow);
-            vect2_t tmp_pos = VECT2(curr_shadow->blur_radius, curr_shadow->blur_radius);
+            dvec2 tmp_pos = DVEC2(curr_shadow->blur_radius, curr_shadow->blur_radius);
             render_text (shadow_cr, tmp_pos, &font_style, str, len, &curr_shadow->color, NULL, NULL);
             css_gaussian_blur (single_shadow, curr_shadow->blur_radius);
 
@@ -1437,7 +1449,7 @@ void css_box_draw (app_graphics_t *gr, struct css_box_t *box, layout_box_t *layo
         text_pos_y += (content_height - layout->content.height)/2;
 
         struct selection_t *selection = &global_gui_st->selection;
-        vect2_t pos = VECT2(text_pos_x, text_pos_y);
+        dvec2 pos = DVEC2(text_pos_x, text_pos_y);
         draw_text_shadows (gr, box, pos, layout->content.str, -1);
 
         struct font_style_t font_style = FONT_STYLE_CSS(box);
@@ -1479,7 +1491,7 @@ void css_box_draw (app_graphics_t *gr, struct css_box_t *box, layout_box_t *layo
 
 void css_add_text_shadow (mem_pool_t *pool, struct css_box_t *css,
                           double h_offset, double v_offset,
-                          double blur_radius, vect4_t color)
+                          double blur_radius, dvec4 color)
 {
     struct text_shadow_t *new_text_shadow =
         (struct text_shadow_t*)mem_pool_push_size (pool, sizeof (struct text_shadow_t));
@@ -1495,7 +1507,7 @@ void css_add_text_shadow (mem_pool_t *pool, struct css_box_t *css,
 void css_add_box_shadow (mem_pool_t *pool, struct css_box_t *css,
                          bool inset, double h_offset, double v_offset,
                          double blur_radius, double spread_distance,
-                         vect4_t color)
+                         dvec4 color)
 {
     struct box_shadow_t *new_box_shadow =
         (struct box_shadow_t*)mem_pool_push_size (pool, sizeof (struct box_shadow_t));
@@ -1516,7 +1528,7 @@ void css_add_box_shadow (mem_pool_t *pool, struct css_box_t *css,
     *box_shadow_list = new_box_shadow;
 }
 
-void css_box_add_gradient_stops (struct css_box_t *box, int num_stops, vect4_t *stops)
+void css_box_add_gradient_stops (struct css_box_t *box, int num_stops, dvec4 *stops)
 {
     assert (_g_gui_num_colors+num_stops < ARRAY_SIZE(_g_gui_colors));
     box->num_gradient_stops = num_stops;
@@ -1530,7 +1542,7 @@ void css_box_add_gradient_stops (struct css_box_t *box, int num_stops, vect4_t *
     }
 }
 
-void rgba_to_hsla (vect4_t *rgba, vect4_t *hsla)
+void rgba_to_hsla (dvec4 *rgba, dvec4 *hsla)
 {
     double max = MAX(MAX(rgba->r,rgba->g),rgba->b);
     double min = MIN(MIN(rgba->r,rgba->g),rgba->b);
@@ -1566,7 +1578,7 @@ void rgba_to_hsla (vect4_t *rgba, vect4_t *hsla)
     hsla->a = rgba->a;
 }
 
-void hsla_to_rgba (vect4_t *hsla, vect4_t *rgba)
+void hsla_to_rgba (dvec4 *hsla, dvec4 *rgba)
 {
     double h_pr = hsla->h*6;
     double chroma = (1-fabs(2*hsla->l-1)) * hsla->s;
@@ -1583,7 +1595,7 @@ void hsla_to_rgba (vect4_t *hsla, vect4_t *rgba)
     double x = chroma*(1-fabs(h_pr_mod_2-1));
     double m = hsla->l - chroma/2;
 
-    *rgba = VECT4(0,0,0,0);
+    *rgba = DVEC4(0,0,0,0);
     if (h_pr == INFINITY) {
         rgba->r = 0;
         rgba->g = 0;
@@ -1620,9 +1632,9 @@ void hsla_to_rgba (vect4_t *hsla, vect4_t *rgba)
 }
 
 static inline
-vect4_t shade (vect4_t *in, double f)
+dvec4 shade (dvec4 *in, double f)
 {
-    vect4_t temp;
+    dvec4 temp;
     rgba_to_hsla (in, &temp);
 
     temp.l *= f;
@@ -1630,23 +1642,23 @@ vect4_t shade (vect4_t *in, double f)
     temp.s *= f;
     temp.s = temp.s>1? 1 : temp.s;
 
-    vect4_t ret;
+    dvec4 ret;
     hsla_to_rgba (&temp, &ret);
     return ret;
 }
 
 static inline
-vect4_t alpha (vect4_t c, double f)
+dvec4 alpha (dvec4 c, double f)
 {
-    vect4_t ret = c;
+    dvec4 ret = c;
     ret.a *= f;
     return ret;
 }
 
 static inline
-vect4_t mix (vect4_t *c1, vect4_t *c2, double f)
+dvec4 mix (dvec4 *c1, dvec4 *c2, double f)
 {
-    vect4_t ret;
+    dvec4 ret;
     int i;
     for (i=0; i<4; i++) {
         ret.E[i] = CLAMP (c1->E[i] + (c2->E[i]-c1->E[i])*f, 0, 1);
@@ -1654,7 +1666,7 @@ vect4_t mix (vect4_t *c1, vect4_t *c2, double f)
     return ret;
 }
 
-void hsv_to_rgb (vect3_t hsv, vect3_t *rgb)
+void hsv_to_rgb (dvec3 hsv, dvec3 *rgb)
 {
     double h = hsv.E[0];
     double s = hsv.E[1];
@@ -1702,10 +1714,10 @@ void hsv_to_rgb (vect3_t hsv, vect3_t *rgb)
     }
 }
 
-void rgba_print (vect4_t rgba)
+void rgba_print (dvec4 rgba)
 {
     printf ("rgba");
-    vect4_print(&rgba);
+    dvec4_print(&rgba);
     printf ("\n");
 }
 
@@ -1717,7 +1729,7 @@ void rgba_print (vect4_t rgba)
 // difference functions like CIE76, CIE94, CIEDE2000.
 
 #if 1
-vect3_t color_palette[13] = {
+dvec3 color_palette[13] = {
     {{0.254902, 0.517647, 0.952941}}, //Google Blue
     {{0.858824, 0.266667, 0.215686}}, //Google Red
     {{0.956863, 0.705882, 0.000000}}, //Google Yellow
@@ -1733,7 +1745,7 @@ vect3_t color_palette[13] = {
     {{0.000000, 0.470588, 0.415686}}};//Deep Teal
 #else
 
-vect3_t color_palette[9] = {
+dvec3 color_palette[9] = {
     {{0.945098, 0.345098, 0.329412}}, // red
     {{0.364706, 0.647059, 0.854902}}, // blue
     {{0.980392, 0.643137, 0.227451}}, // orange
@@ -1748,7 +1760,7 @@ vect3_t color_palette[9] = {
 #define PHI_INV 0.618033988749895
 #define COLOR_OFFSET 0.4
 
-void get_next_color (vect3_t *color)
+void get_next_color (dvec3 *color)
 {
     static double h = COLOR_OFFSET;
     static uint32_t palette_idx = 0;
@@ -1768,7 +1780,7 @@ void get_next_color (vect3_t *color)
         if (h>1) {
             h -= 1;
         }
-        hsv_to_rgb (VECT3(h, 0.8, 0.7), color);
+        hsv_to_rgb (DVEC3(h, 0.8, 0.7), color);
     }
 }
 
@@ -1782,7 +1794,7 @@ void init_button (mem_pool_t *pool, struct css_box_t *box)
     box->border_radius = 2.5;
     box->color = text_color;
 
-    vect4_t stops[3] = {RGBA(0,0,0,0),
+    dvec4 stops[3] = {RGBA(0,0,0,0),
                         RGBA(0,0,0,0),
                         RGBA(0,0,0,0.04)};
     css_box_add_gradient_stops (box, ARRAY_SIZE(stops), stops);
@@ -1842,7 +1854,7 @@ void init_suggested_action_button (mem_pool_t *pool, struct css_box_t *box)
     box->border_color = shade (&selected_bg_color, 0.8);
     box->color = selected_fg_color;
 
-    vect4_t stops[2] = {shade(&selected_bg_color,1.1),
+    dvec4 stops[2] = {shade(&selected_bg_color,1.1),
                         shade(&selected_bg_color,0.9)};
     css_box_add_gradient_stops (box, ARRAY_SIZE(stops), stops);
 
@@ -1869,7 +1881,7 @@ void init_suggested_action_button_active (mem_pool_t *pool, struct css_box_t *bo
     box->border_color = shade (&selected_bg_color, 0.8);
     box->color = selected_fg_color;
 
-    vect4_t stops[2] = {shade(&selected_bg_color,1.05),
+    dvec4 stops[2] = {shade(&selected_bg_color,1.05),
                         shade(&selected_bg_color,0.95)};
     css_box_add_gradient_stops (box, ARRAY_SIZE(stops), stops);
 }
@@ -1893,7 +1905,7 @@ void init_text_entry (mem_pool_t *pool, struct css_box_t *box)
     box->padding_x = 3;
     box->padding_y = 3;
     box->color = text_color;
-    vect4_t stops[2] = {shade (&base_color, 0.93),
+    dvec4 stops[2] = {shade (&base_color, 0.93),
                         shade (&base_color, 0.97)};
     css_box_add_gradient_stops (box, ARRAY_SIZE(stops), stops);
 
@@ -1915,7 +1927,7 @@ void init_text_entry_focused (mem_pool_t *pool, struct css_box_t *box)
     box->padding_x = 3;
     box->padding_y = 3;
     box->color = text_color;
-    vect4_t stops[2] = {shade (&base_color, 0.93),
+    dvec4 stops[2] = {shade (&base_color, 0.93),
                         shade (&base_color, 0.97)};
     css_box_add_gradient_stops (box, ARRAY_SIZE(stops), stops);
 

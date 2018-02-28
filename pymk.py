@@ -34,7 +34,7 @@ def default():
 
 def closet_maker ():
     os.makedirs ("bin", exist_ok=True)
-    ex ('gcc {FLAGS} -o bin/closet_maker cm_x11_platform.c {DEP_FLAGS} {PANGO_FLAGS}')
+    ex ('gcc {FLAGS} -o bin/closet_maker x11_platform.c {DEP_FLAGS} {PANGO_FLAGS}')
     return
 
 if __name__ == "__main__":
