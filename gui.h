@@ -256,6 +256,7 @@ struct gui_state_t {
     int focused_layout_box;
     int num_layout_boxes;
     struct layout_box_t *layout_boxes;
+    struct css_box_t css_styles[CSS_NUM_STYLES];
 
     struct selection_t selection;
     struct behavior_t *behaviors;
@@ -266,8 +267,6 @@ struct gui_state_t {
 
     bool clipboard_ready;
     char *clipboard_str;
-
-    struct css_box_t css_styles[CSS_NUM_STYLES];
 };
 
 struct gui_state_t *global_gui_st;
@@ -364,8 +363,6 @@ void gui_destroy (struct gui_state_t *gui_st)
 // FONT BACKEND
 
 #ifdef __PANGO_H__
-#define new_pango_layout_from_style_fsw(cr,family,size,weight) \
-    new_pango_layout_from_style(cr, FONT_STYLE_FSW(family,size,weight))
 PangoLayout* new_pango_layout_from_style (cairo_t *cr, struct font_style_t *font_style)
 {
     const char *font_family;
@@ -530,17 +527,6 @@ void int_string_update_s (uint64_string_t *x, char* str)
 {
     x->i = strtoull (str, NULL, 10);
     str_set (&x->str, str);
-}
-
-// Calculates a ratio by which multiply box a so that it fits inside box b
-double best_fit_ratio (double a_width, double a_height,
-                       double b_width, double b_height)
-{
-    if (a_width/a_height < b_width/b_height) {
-        return b_height/a_height;
-    } else {
-        return b_width/a_width;
-    }
 }
 
 static inline
@@ -1726,13 +1712,6 @@ void hsv_to_rgb (dvec3 hsv, dvec3 *rgb)
             rgb->b = desc;
             break;
     }
-}
-
-void rgba_print (dvec4 rgba)
-{
-    printf ("rgba");
-    dvec4_print(&rgba);
-    printf ("\n");
 }
 
 // Automatic color palette:

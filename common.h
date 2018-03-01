@@ -385,7 +385,7 @@ void str_cat (string_t *dest, string_t *src)
 
     str_maybe_grow (dest, len, true);
     char *dest_data = str_data(dest);
-    memmove (dest_data+len_dest, str_data(src), len);
+    memmove (dest_data+len_dest, str_data(src), str_len(src));
     dest_data[len] = '\0';
 }
 
@@ -416,6 +416,7 @@ typedef union {
     double E[2];
 } dvec2;
 #define DVEC2(x,y) ((dvec2){{x,y}})
+#define CAST_DVEC2(v) (dvec2){{(double)v.x,(double)v.y}}
 
 // TODO: These are 128 bit structs, they may take up a lot of space, maybe have
 // another one of 32 bits for small coordinates.
@@ -428,6 +429,7 @@ typedef union {
     int64_t E[2];
 } ivec2;
 #define IVEC2(x,y) ((ivec2){{x,y}})
+#define CAST_IVEC2(v) (ivec2){{(int64_t)v.x,(int64_t)v.y}}
 
 #define vec_equal(v1,v2) ((v1)->x == (v2)->x && (v1)->y == (v2)->y)
 
@@ -525,7 +527,7 @@ bool left (dvec2 a, dvec2 b, dvec2 c)
 }
 
 // true if vector p points to the left of vector a
-#define left_vect(a,p) left(DVEC2(0,0),a,p)
+#define left_dvec2(a,p) left(DVEC2(0,0),a,p)
 
 // true if point c is to the left or in a-->b
 bool left_on (dvec2 a, dvec2 b, dvec2 c)
@@ -541,7 +543,7 @@ double dvec2_clockwise_angle_between (dvec2 v1, dvec2 v2)
 {
     if (vec_equal (&v1, &v2)) {
         return 0;
-    } else if (left_vect (v2, v1))
+    } else if (left_dvec2 (v2, v1))
         return acos (dvec2_dot (v1, v2)/(dvec2_norm (v1)*dvec2_norm(v2)));
     else
         return 2*M_PI - acos (dvec2_dot (v1, v2)/(dvec2_norm (v1)*dvec2_norm(v2)));
@@ -1040,6 +1042,70 @@ mat4f transform_from_2_points (dvec3 s1, dvec3 s2, dvec3 d1, dvec3 d2)
          0, 0, 0, 1
     }};
     return res;
+}
+
+// This may as well be a 3x3 matrix but sometimes the semantics are simpler like
+// this. Of course this is subjective.
+typedef struct {
+    double scale_x;
+    double scale_y;
+    double dx;
+    double dy;
+} transf_t;
+
+void apply_transform (transf_t *tr, dvec2 *p)
+{
+    p->x = tr->scale_x*p->x + tr->dx;
+    p->y = tr->scale_y*p->y + tr->dy;
+}
+
+void apply_transform_distance (transf_t *tr, dvec2 *p)
+{
+    p->x = tr->scale_x*p->x;
+    p->y = tr->scale_y*p->y;
+}
+
+void apply_inverse_transform (transf_t *tr, dvec2 *p)
+{
+    p->x = (p->x - tr->dx)/tr->scale_x;
+    p->y = (p->y - tr->dy)/tr->scale_y;
+}
+
+void apply_inverse_transform_distance (transf_t *tr, dvec2 *p)
+{
+    p->x = p->x/tr->scale_x;
+    p->y = p->y/tr->scale_y;
+}
+
+void transform_translate (transf_t *tr, dvec2 *delta)
+{
+    tr->dx += delta->x;
+    tr->dy += delta->y;
+}
+
+// Calculates a ratio by which multiply box a so that it fits inside box b
+double best_fit_ratio (double a_width, double a_height,
+                       double b_width, double b_height)
+{
+    if (a_width/a_height < b_width/b_height) {
+        return b_height/a_height;
+    } else {
+        return b_width/a_width;
+    }
+}
+
+void compute_best_fit_box_to_box_transform (transf_t *tr, box_t *src, box_t *dest)
+{
+    double src_width = BOX_WIDTH(*src);
+    double src_height = BOX_HEIGHT(*src);
+    double dest_width = BOX_WIDTH(*dest);
+    double dest_height = BOX_HEIGHT(*dest);
+
+    tr->scale_x = best_fit_ratio (src_width, src_height,
+                                dest_width, dest_height);
+    tr->scale_y = tr->scale_x;
+    tr->dx = dest->min.x + (dest_width-src_width*tr->scale_x)/2;
+    tr->dy = dest->min.y + (dest_height-src_height*tr->scale_y)/2;
 }
 
 void swap (int*a, int*b)
@@ -1735,7 +1801,8 @@ char* full_file_read_prefix (mem_pool_t *out_pool, const char *path, char **pref
 {
     mem_pool_t pool = {0};
     char *retval = NULL;
-    string_t pfx_s;
+    string_t pfx_s = {0};
+    string_t path_s = str_new (path);
     char *dir_path = sh_expand (path, &pool);
 
     int status, i = 0;
@@ -1744,7 +1811,6 @@ char* full_file_read_prefix (mem_pool_t *out_pool, const char *path, char **pref
         if (errno == ENOENT && prefix != NULL && *prefix != NULL) {
             str_set (&pfx_s, prefix[i]);
             assert (str_last(&pfx_s) == '/');
-            string_t path_s = str_new (path);
             str_cat (&pfx_s, &path_s);
             dir_path = sh_expand (str_data(&pfx_s), &pool);
             i++;
@@ -1752,6 +1818,8 @@ char* full_file_read_prefix (mem_pool_t *out_pool, const char *path, char **pref
             break;
         }
     }
+    str_free (&pfx_s);
+    str_free (&path_s);
 
     if (status == 0) {
         retval = (char*)pom_push_size (out_pool, st.st_size + 1);
