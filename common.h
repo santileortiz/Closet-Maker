@@ -6,6 +6,9 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <inttypes.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <errno.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -356,16 +359,25 @@ void strn_set (string_t *str, const char *c_str, size_t len)
     dest[len] = '\0';
 }
 
-#define str_put(str,pos,c_str) strn_put(str,pos,(c_str),((c_str)!=NULL?strlen(c_str):0))
-void strn_put (string_t *str, size_t pos, const char *c_str, size_t len)
+void str_put (string_t *dest, size_t pos, string_t *str)
 {
-    str_maybe_grow (str, pos + len, false);
+    str_maybe_grow (dest, pos + str_len(str), true);
 
-    char *dest = str_data(str) + pos;
+    char *dst = str_data(dest) + pos;
+    memmove (dst, str_data(str), str_len(str));
+    dst[str_len(str)] = '\0';
+}
+
+#define str_put_c(dest,pos,c_str) strn_put_c(dest,pos,(c_str),((c_str)!=NULL?strlen(c_str):0))
+void strn_put_c (string_t *dest, size_t pos, const char *c_str, size_t len)
+{
+    str_maybe_grow (dest, pos + len, true);
+
+    char *dst = str_data(dest) + pos;
     if (c_str != NULL) {
-        memmove (dest, c_str, len);
+        memmove (dst, c_str, len);
     }
-    dest[len] = '\0';
+    dst[len] = '\0';
 }
 
 void str_cpy (string_t *dest, string_t *src)
@@ -389,9 +401,69 @@ void str_cat (string_t *dest, string_t *src)
     dest_data[len] = '\0';
 }
 
+#define str_cat_c(dest,c_str) strn_cat_c(dest,(c_str),((c_str)!=NULL?strlen(c_str):0))
+void strn_cat_c (string_t *dest, const char *src, size_t len)
+{
+    size_t len_dest = str_len(dest);
+    size_t total_len = len_dest + len;
+
+    str_maybe_grow (dest, total_len, true);
+    char *dest_data = str_data(dest);
+    memmove (dest_data+len_dest, src, len);
+    dest_data[total_len] = '\0';
+}
+
 char str_last (string_t *str)
 {
     return str_data(str)[str_len(str)-1];
+}
+
+//////////////////////
+// PARSING UTILITIES
+//
+// These are some small functions useful when parsing text files
+
+static inline
+char *consume_line (char *c)
+{
+    while (*c && *c != '\n') {
+           c++;
+    }
+
+    if (*c) {
+        c++;
+    }
+
+    return c;
+}
+
+static inline
+bool is_space (char *c)
+{
+    return *c == ' ' ||  *c == '\t';
+}
+
+static inline
+char *consume_spaces (char *c)
+{
+    while (is_space(c)) {
+           c++;
+    }
+    return c;
+}
+
+static inline
+bool is_end_of_line_or_file (char *c)
+{
+    c = consume_spaces (c);
+    return *c == '\n' || *c == '\0';
+}
+
+static inline
+bool is_end_of_line (char *c)
+{
+    c = consume_spaces (c);
+    return *c == '\n';
 }
 
 #define VECT_X 0
@@ -1291,6 +1363,36 @@ void sorted_array_print (int *arr, int n)
     array_print (sorted, n);
 }
 
+// Does binary search over arr. If n is not present, insert it at it's sorted
+// position. If n is found in arr, do nothing.
+void int_array_set_insert (int n, int *arr, int *arr_len, int arr_max_size)
+{
+    bool found = false;
+    int low = 0;
+    int up = *arr_len;
+    while (low != up) {
+        int mid = (low + up)/2;
+        if (n == arr[mid]) {
+            found = true;
+            break;
+        } else if (n < arr[mid]) {
+            up = mid;
+        } else {
+            low = mid + 1;
+        }
+    }
+
+    if (!found) {
+        assert (*arr_len < arr_max_size - 1);
+        uint32_t i;
+        for (i=*arr_len; i>low; i--) {
+            arr[i] = arr[i-1];
+        }
+        arr[low] = n;
+        (*arr_len)++;
+    }
+}
+
 void print_u64_array (uint64_t *arr, int n)
 {
     printf ("[");
@@ -1740,6 +1842,30 @@ char* collapse_str_arr (char **arr, int n, mem_pool_t *pool)
     return res;
 }
 
+// Flattens an array of num_arrs arrays (arrs) into a single array e. Elements
+// in arrs are of size e_size and the lengths of each array is specified in the
+// array arrs_lens.
+void flatten_array (mem_pool_t *pool, uint32_t num_arrs, size_t e_size,
+                    void **arrs, uint32_t *arrs_lens,
+                    void **e, uint32_t *num_e)
+{
+    *num_e = 0;
+    int i;
+    for (i=0; i<num_arrs; i++) {
+        *num_e += arrs_lens [i];
+    }
+
+    void *res = pom_push_size (pool, *num_e * e_size);
+    uint8_t *ptr = res;
+
+    for (i=0; i<num_arrs; i++) {
+        memcpy (ptr, arrs[i], arrs_lens[i]*e_size);
+        ptr += arrs_lens[i]*e_size;
+    }
+
+    *e = res;
+}
+
 // Expand _str_ as bash would, allocate it in _pool_ or heap. 
 // NOTE: $(<cmd>) and `<cmd>` work but don't get too crazy, this spawns /bin/sh
 // and a subprocess. Using env vars like $HOME, or ~/ doesn't.
@@ -1877,9 +2003,28 @@ char* change_extension (mem_pool_t *pool, char *path, char *new_ext)
     while (i>0 && path[i-1] != '.') {
         i--;
     }
+
     char *res = (char*)mem_pool_push_size (pool, path_len+strlen(new_ext)+1);
     strcpy (res, path);
     strcpy (&res[i], new_ext);
+    return res;
+}
+
+char* remove_extension (mem_pool_t *pool, char *path)
+{
+    size_t end_pos = strlen(path)-1;
+    while (end_pos>0 && path[end_pos] != '.') {
+        end_pos--;
+    }
+
+    if (end_pos == 0) {
+        // NOTE: path had no extension.
+        return NULL;
+    }
+
+    char *res = (char*)mem_pool_push_size (pool, end_pos+1);
+    memmove (res, path, end_pos);
+    res[end_pos] = '\0';
     return res;
 }
 

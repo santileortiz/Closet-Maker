@@ -1,6 +1,34 @@
-import sys, subprocess, os, ast
+import sys, subprocess, os, ast, shutil
 
 import importlib.util, inspect, pathlib, filecmp
+
+"""
+!!!!!!IMPOTRANT!!!!!
+The idea of this library is to make easy to call python functions located in
+the file pymk.py through the command line. Every function created in that file
+is called a build target because we provide some extra functionality for them.
+At the moment some of these functionalities are:
+
+    - Automatic TAB completions.
+    - Automatic guessing of packages that provide libraries used as gcc flags.
+    - Calling './pymk.py my_target' calls my_target
+
+To be able to provide these we need to call the targets in a dry_run mode that
+won't have side effects besides updating several global variables in this
+module. For this reason when editing/creating a target function the user has to
+have in mind targets may be called at unexpected times but ONLY in dry_run
+mode. If the target calls functions with side effects besides the ones in this
+module then we tell the user we are in dry_mode run through the g_dry_run
+global variable. Which means the user should separate code with side effects as
+follows:
+
+    def my_target():
+        global g_dry_run
+        if not g_dry_run:
+            <code with side effects>
+
+"""
+
 def get_functions():
     """
     Returns a list of functions defined in the __main__ module, it's a list of
@@ -18,28 +46,32 @@ def get_user_functions():
     keys = globals().copy().keys()
     return [(m,v) for m,v in get_functions() if m not in keys]
 
-def call_user_function(name):
+def call_user_function(name, dry_run=False):
     fun = None
     for f_name, f in get_user_functions():
         if f_name == name:
             fun = f
             break
 
+    global g_dry_run
+    if dry_run:
+        g_dry_run = True
+
     fun() if fun else print ('No function: '+name)
+
+    if dry_run:
+        g_dry_run = False
     return
 
 def check_completions ():
     comp_path = pathlib.Path('/usr/share/bash-completion/completions/pymk.py')
     if not comp_path.exists():
-        warn ('Tab completions not installed:')
+        print ('Tab completions not installed:')
         print ('Use "sudo ./pymk.py --install_completions" to install them\n')
         return
-    if comp_path.is_file():
-        if not filecmp.cmp ('mkpy/pymk.py', str(comp_path)):
-            err ('Tab completions outdated:')
-            print ('Update with "sudo ./pymk.py --install_completions"\n')
-    else:
-        err ('Something funky is going on.')
+    if comp_path.is_file() and not filecmp.cmp ('mkpy/pymk.py', str(comp_path)):
+        err ('Tab completions outdated:')
+        print ('Update with "sudo ./pymk.py --install_completions"\n')
 
 def default_opt (s):
     opt_lst = s.split(',')
@@ -57,6 +89,8 @@ def cli_completion_options ():
     Handles command line options used by tab completion.
     The option --get_completions exits the script after printing completions.
     """
+    global cli_completions
+
     if get_cli_option('--install_completions'):
         ex ("cp mkpy/pymk.py /usr/share/bash-completion/completions/")
 
@@ -95,9 +129,14 @@ def get_cli_option (opts, values=None, has_argument=False, unique_option=False):
     additional error checking is available if _values_ is set to a list of the
     possible values the argument could take.
 
+    NOTE: We don't detect if there is an argument, the caller must tell if it
+    expects an argument or not by using has_argument.
+
     When unique_option is True then _opt_ must be the only option used.
 
     """
+    global cli_completions
+
     res = None
     i = 1
     if values != None: has_argument = True
@@ -172,14 +211,45 @@ def get_deps_pkgs (flags):
     res = ex ('echo "' +str(strs)+ '" | grep -Po "^.*?(?=:)" | sort | uniq | xargs echo', ret_stdout=True, echo=False)
     print (res[:-1])
 
+ex_cmds = []
+g_dry_run = False
+
+def set_dry_run():
+    global g_dry_run
+    g_dry_run = True
+
 def ex (cmd, no_stdout=False, ret_stdout=False, echo=True):
+    global g_dry_run
+
     resolved_cmd = cmd.format(**get_user_str_vars())
+
+    if g_dry_run:
+        ex_cmds.append(resolved_cmd)
+        return
+
     if echo: print (resolved_cmd)
+
     if not ret_stdout:
         redirect = open(os.devnull, 'wb') if no_stdout else None
         return subprocess.call(resolved_cmd, shell=True, stdout=redirect)
     else:
         return subprocess.check_output(resolved_cmd, shell=True, stderr=open(os.devnull, 'wb')).decode()
+
+def get_target ():
+    if len(sys.argv) == 1:
+        return 'default'
+    else:
+        if sys.argv[1].startswith ('-'):
+            return 'default'
+        else:
+            return sys.argv[1]
+
+def get_target_dep_pkgs ():
+    global ex_cmds
+    call_user_function (get_target(), dry_run=True)
+    for s in ex_cmds:
+        if s.startswith('gcc'):
+            get_deps_pkgs (s)
 
 def pers (name, default=None, value=None):
     """
@@ -190,6 +260,9 @@ def pers (name, default=None, value=None):
     If default is used, when _value_==None and _name_ is not in the cache the
     pair _name_:_default is stored.
     """
+    global g_dry_run
+    if g_dry_run:
+        return
 
     cache_dict = {}
     if os.path.exists('mkpy/cache'):
@@ -213,17 +286,78 @@ def pers (name, default=None, value=None):
     cache.write (str(cache_dict)+'\n')
     return cache_dict.get (name)
 
-def pymk_default ():
-    if len(sys.argv) == 1:
-        check_completions ()
-        call_user_function ('default')
+# This could also be accomplished by:
+#   ex ('mkdir -p {path_s}')
+# Maybe remove this function and use that instead, although it won't work on Windows
+def ensure_dir (path_s):
+    global g_dry_run
+    if g_dry_run:
         return
-    cli_completion_options()
-    if get_cli_rest():
-        f_names = [s for s,f in get_user_functions()]
-        targets = set(get_cli_rest()).intersection(f_names)
-        for t in targets:
-            check_completions ()
-            call_user_function (t)
-            pers ('last_target', value=t)
+
+    resolved_path = path_s.format(**get_user_str_vars())
+
+    path = pathlib.Path(resolved_path)
+    if not path.exists():
+        os.makedirs (resolved_path)
+
+def file_time(fname):
+    res = 0
+    tgt_path = pathlib.Path(fname)
+    if tgt_path.is_file():
+        res = os.stat(fname).st_mtime
+    return res
+
+def install_files (info_dict, prefix=None):
+    global g_dry_run
+
+    if prefix == None:
+        prefix = '/'
+
+    prnt = []
+    for f in info_dict.keys():
+        dst = prefix + info_dict[f]
+        resolved_dst = dst.format(**get_user_str_vars())
+        resolved_f = f.format(**get_user_str_vars())
+
+        # Compute the absolute dest path including the file, even if just a
+        # dest directory was specified
+        dst_dir, fname = os.path.split (resolved_dst)
+        if fname == '':
+            _, fname = os.path.split (resolved_f)
+        dest_file = dst_dir + '/' + fname
+
+        # If the file already exists check we have a newer version. If we
+        # don't, skip it.
+        install_file = True
+        dest_file_path = pathlib.Path(dest_file)
+        if dest_file_path.exists():
+            src_time = file_time (resolved_f)
+            dst_time = file_time (dest_file)
+            if (src_time < dst_time):
+                install_file = False
+
+        if install_file:
+            if not g_dry_run:
+                dst_path = pathlib.Path(dst_dir)
+                if not dst_path.exists():
+                    os.makedirs (dst_dir)
+
+                shutil.copy (resolved_f, dest_file)
+                prnt.append (dest_file)
+            else:
+                prnt.append ('Install: ' + resolved_f + ' -> ' + dest_file)
+
+    prnt.sort()
+    [print (s) for s in prnt]
+
+    return prnt
+
+def pymk_default ():
+    check_completions ()
+    cli_completion_options() # If we are being called by the tab completion script, execution ends here
+
+    t = get_target()
+    call_user_function (t)
+    if t != 'default' and t != 'install':
+        pers ('last_target', value=t)
 
