@@ -16,7 +16,6 @@
 #include <GL/gl.h>
 #include <GL/glext.h>
 #include <cairo/cairo-xlib.h>
-#include <pango/pangocairo.h>
 
 #include <inttypes.h>
 #include <fcntl.h>

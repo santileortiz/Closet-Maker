@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+from mkpy import utility as cfg
 from mkpy.utility import *
 assert sys.version_info >= (3,2)
 
@@ -10,15 +11,6 @@ DEP_FLAGS = '-lGL ' \
             '-lxcb-sync ' \
             '-lxcb-randr ' \
             '-lm '
-
-# NOTE: This is too much just to depend on Pango, maybe move to HarfBuzz?
-PANGO_FLAGS = '-lgobject-2.0 ' \
-              '-lpango-1.0 ' \
-              '-lpangocairo-1.0 ' \
-              '-I/usr/include/pango-1.0 ' \
-              '-I/usr/include/cairo ' \
-              '-I/usr/include/glib-2.0 ' \
-              '-I/usr/lib/x86_64-linux-gnu/glib-2.0/include '
 
 modes = {
         'debug': '-g -Wall',
@@ -34,12 +26,14 @@ def default():
 
 def closet_maker ():
     os.makedirs ("bin", exist_ok=True)
-    ex ('gcc {FLAGS} -o bin/closet_maker x11_platform.c {DEP_FLAGS} {PANGO_FLAGS}')
+    ex ('gcc {FLAGS} -o bin/closet_maker x11_platform.c {DEP_FLAGS}')
     return
 
+cfg.builtin_completions = ['--get_run_deps', '--get_build_deps']
 if __name__ == "__main__":
-    if get_cli_option ('--get_deps_pkgs'):
-        get_deps_pkgs (DEP_FLAGS)
-        exit()
+    # Everything above this line will be executed for each TAB press.
+    # If --get_completions is set, handle_tab_complete() calls exit().
+    handle_tab_complete ()
+
     pymk_default()
 
